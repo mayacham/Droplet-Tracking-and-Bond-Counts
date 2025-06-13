@@ -11,240 +11,224 @@ Created on Thu May 15 01:32:31 2025
 
 @author: marzu
 """
-import numpy as np
-import matplotlib.pyplot as plt
-import os
-from skimage.filters import unsharp_mask
-from skimage.feature import match_template, peak_local_max
-import pandas as pd
-import pims
-import trackpy as tp
-import imageio
-import matplotlib as mpl
-from skimage.color import rgba2rgb, rgb2gray  # For image color conversions
-import cv2
-from sklearn.neighbors import KDTree
 
-# Define a function to do template matching and find peak matches
-def MatchTemplate1(img, template1, thresh):
-    # Compute a match score for how well the template matches each position in the image
-    match1 = match_template(img, template1, pad_input=True)
 
-    # Find peaks in the match score image that are local maxima and above a certain threshold
-    peaks1 = peak_local_max(match1, min_distance=10, threshold_rel=thresh)
 
-    return match1, peaks1  # Return both the match image and the list of peak positions
 
-def MatchTemplate2(img, template2, thresh):
-    # Compute a match score for how well the template matches each position in the image
-    match2 = match_template(img, template2, pad_input=True)
+##need to fix COM because it is using unweighted at one point
+## fix neighbour
+## theres a section to filter out short lived trajectories - use that for the random circles that appear so we can se bounds lower
 
-    # Find peaks in the match score image that are local maxima and above a certain threshold
-    peaks2 = peak_local_max(match2, min_distance=10, threshold_rel=thresh)
 
-    return match2, peaks2  # Return both the match image and the list of peak positions
 
+
+
+import numpy as np #numerical opperations
+import matplotlib.pyplot as plt #plotting graphs and images
+import os #file and directory operations
+from skimage.filters import unsharp_mask #to sharpen images
+from skimage.feature import match_template, peak_local_max #for template matching and peak detection
+from skimage.color import rgba2rgb, rgb2gray  # for image color conversions to grayscale
+# Data handling and tracking libraries
+import pandas as pd               # For dataframes (tables of data)
+import pims                       # For loading image sequences (videos)
+import trackpy as tp              # For tracking particles across frames
+import imageio                    # For reading and writing image files
+import matplotlib as mpl          # For advanced plotting (colormaps, etc.)
+import cv2                        # OpenCV library for additional image processing
+from sklearn.neighbors import KDTree  # For efficient nearest neighbour searches
 
 # Define an image preprocessing function using PIMS pipeline
+# Preprocess each image frame: crop, convert to grayscale, sharpen, and normalize
 @pims.pipeline
 def preprocess_img(frame):
-    
+    # Crop the image to focus on the region of interest and avoid processing unnecessary parts ------------------
     frame = frame[0:1200, 0:1500]
-
+    
     #the next few lines are to convert a RGBA image into a grayscale image
+    # If the image has 4 channels (RGBA), convert it to RGB
     if frame.ndim == 3 and frame.shape[2] == 4:
         frame = rgba2rgb(frame)
+    # If the image has 3 channels (RGB), convert it to grayscale
     if frame.ndim == 3 and frame.shape[2] == 3:
         frame = rgb2gray(frame)
+    # Convert image values from float (0-1) to 8-bit integers (0-255)
     frame = (frame * 255).astype(np.uint8)
 
-    # Sharpen the image using unsharp masking
-    frame = unsharp_mask(frame, radius=2, amount=5)
+    frame = unsharp_mask(frame, radius=2, amount=5)     # Sharpen the image using unsharp masking to enhance droplet features
 
-    # Normalize the sharpened image back to 8-bit range
-    frame *= 255.0 / frame.max()
+    frame *= 255.0 / frame.max()     # Normalize the sharpened image back to 8-bit range from 0-255
     
-    # Return the final preprocessed image
-    return frame.astype(np.uint8)
+    return frame.astype(np.uint8)     # Return the final preprocessed image
 
 
 # Function to plot trajectories up to a specific frame number `k`
 def plotTraj(traj, k, directory, frames,COM):
-    plt.figure(figsize=(12, 8), dpi=150)  # Create a figure
+    plt.figure(figsize=(12, 8), dpi=150)  #     # Create a new figure with specified size and resolution
     plt.clf()  # Clear current figure (in case it’s being reused)
 
-    # Filter the trajectory DataFrame to include only frames up to `k`
-    subset = traj[traj.frame <= k]
+    subset = traj[traj.frame <= k]     # Filter the trajectory DataFrame to include only frames up to `k`
+    # Set the limits of the x and y axes to zoom in on region of interest --------------------------------------
     plt.xlim(700,1000)
     plt.ylim(500,900)
-    # Plot the trajectories over the background image at frame `k`
+    # Plot the center of mass at the current frame 'k'  as a red X
     plt.scatter(COM_df.loc[COM_df['frame'] == k, 'x'].values[0], COM_df.loc[COM_df['frame'] == k, 'y'].values[0],
                 color='red', marker='x', s=100, label='Center of Mass')
+    # Plot the center of mass at the initial frame 'framei' as a blue X
     plt.scatter(COM_df.loc[COM_df['frame'] == framei, 'x'].values[0], COM_df.loc[COM_df['frame'] == framei, 'y'].values[0], 
                 color='dodgerblue', marker='x', s=75, label='Initial Center of Mass')
-
+    # Plot trajectories using trackpy, coloring by particle ID, overlaid on the video frame at frame 'k'
     tp.plot_traj(subset, colorby='particle', cmap=mpl.cm.winter,
                  superimpose=frames[k-framei], plot_style={'linewidth': 2})
     
-    
-#%%
-def findNNdf(df, rad):
-    '''
-    This code uses a KD tree to quickly find how many points are within
-    a given distance of each point's neighbor points. Should use rad>droplet radius
-    to account for any errors in finding the position.
-    The function returns the original DataFrame with added columns for nearest neighbor indices,
-    number of nearest neighbors, and the fraction of nearest neighbors with a given number of neighbors.
-    Parameters:
-    df : pandas.DataFrame
-        DataFrame containing the x and y coordinates along with any other columns
-    rad : float
-        The radius distance within which nearest neighbors are found
-    Returns:
-    df : pandas.DataFrame
-        The original DataFrame with added columns for nearest neighbors information
-    nn_df : pandas.DataFrame
-        DataFrame containing the nearest neighbor indices, number of neighbors, and fraction of neighbors
-    '''
+# Function to find nearest neighbours using KDTree for fast and effiecient spatial search
+# adds columns to the dataframe indicating each particle's neighbours and the number of neighbours.
+'''
+Parameters:
+df : pandas.DataFrame
+    DataFrame containing at least 'x', 'y', and 'particle' columns.
+rad : float
+    The radius within which neighbours are searched for. Use rad > droplet size to account for position errors.
+Returns:
+df : pandas.DataFrame
+    The input dataframe with two new columns: 
+    'nearest_neighbours' (list of neighboring particles)
+    'num_neighbours' (number of neighbours found)
+'''
+def findNNdf(df, rad): 
     # Extract x and y coordinates from the DataFrame
-    points = df[['x', 'y']].values
-    # Build the KDTree with the given points
-    tree = KDTree(points, leaf_size=2)
-    # Find the nearest neighbors within the given radius
-    nn_indices = tree.query_radius(points, r=rad)
+    points = df[['x', 'y']].values     
+    # Build the KDTree with the given points for fast neighbour searching
+    tree = KDTree(points, leaf_size=2)    
+    # Find the nearest neighbours within the given radius using the tree
+    nn_indices = tree.query_radius(points, r=rad)   
     # Map the indices to particle numbers using the 'particle' column
     particle_numbers = df['particle'].values
     nn_particle_numbers = [particle_numbers[i] for i in nn_indices]
-    # Calculate the number of nearest neighbors for each point (excluding itself)
-    numNN = np.array([len(i) - 1 for i in nn_indices])  # Subtract 1 to exclude the point itself
-    # Add the nearest neighbor data to the original DataFrame
+    # Count the number of neighbours for each particle (excluding itself)
+    numNN = np.array([len(i) - 1 for i in nn_indices])  
+    # Add the nearest neighbour data to the original DataFrame
     df['nearest_neighbors'] = nn_particle_numbers
     df.loc[:,'num_neighbors'] = numNN
     #return df, nn_fraction_df
     return df
+
+
+# Function to filter neighbours based on particle sizes and exclude neighbours too far apart
 def filter_neighbors_by_size(info,tolerance=1.1):
     '''
-    This function updates the 'nearest_neighbors' column of the DataFrame by filtering the neighbors
-    based on their distances and sizes. The distance between a particle and its neighbors is compared
-    to the sum of their 'size' values. Only neighbors that are within this distance are retained.
+    This function filters neighbours based on size and distance.
+    A neighbour is only kept if its distance is smaller than the sum of both particle sizes * tolerance factor.
     Parameters:
-    df : pandas.DataFrame
-        The DataFrame containing particle data, including 'x', 'y', 'size', and 'nearest_neighbors'
-    x_col : str, optional
-        The name of the column representing the x-coordinate (default is 'x')
-    y_col : str, optional
-        The name of the column representing the y-coordinate (default is 'y')
-    size_col : str, optional
-        The name of the column representing the particle's size (default is 'size')
-    rad_col : str, optional
-        The name of the column representing the nearest neighbors' particle numbers (default is 'nearest_neighbors')
-    particle_col : str, optional
-        The name of the column representing the particle identifier (default is 'particle')
+    info : pandas.DataFrame
+        DataFrame containing 'x', 'y', 'size', 'particle', and 'nearest_neighbours' columns.
+    tolerance : float
+        Multiplier to slightly increase neighbour distance allowance (default: 1.1).
     Returns:
     df : pandas.DataFrame
-        The DataFrame with the updated 'nearest_neighbors' column, filtered by size-distance criteria
+        Updated dataframe with filtered neighbours and updated 'num_neighbours' count.
     '''
-    df=info
+    df=info #  renaming for local clarity
     # Get the particle positions and sizes
     particles = df['particle'].values
     sizes = df['size'].values
     x_coords = df['x'].values
     y_coords = df['y'].values
-    # Loop through each particle
+    # Lists to store updated neighbour lists and neighbour counts when looping
     updated_neigh_list = []
     numneigh=[]
-
     
+    #loop over each particle
     for i, particle_id in enumerate(particles):
-        # Get the list of neighboring particles' IDs
+        # Reset index to avoid accidental misalignment
         df = df.reset_index(drop=True)
+        # Retrieve the current list of neighbours IDs for this particle
         neighbors = df[df['particle']==particle_id]['nearest_neighbors'].iloc[0]
-        # print(neighbors)
+        # print(neighbours)   ##bug checking---------------------------------------------
         # Get the current particle's position and size
         x_i, y_i, size_i = x_coords[i], y_coords[i], sizes[i]
-        # Initialize the list of valid neighbors for this particle
+        # Start an empty list for valid neighbours
         valid_neighbors = []
-        # Check each neighbor
+        # Loop through neighbours and check distance condition
         for neighbor_id in neighbors:
-            #This will skip calling itself it's own neighbour
-            if neighbor_id == particle_id:
+            if neighbor_id == particle_id:     #This will skip calling itself it's own neighbour
                 continue
-            # Get the index of the neighbor
+            # Find neighbor's index in dataframe
             neighbor_idx = df[df['particle'] == neighbor_id].index[0]
             # Get the neighbor's position and size
             x_j, y_j, size_j = x_coords[neighbor_idx], y_coords[neighbor_idx], sizes[neighbor_idx]
-            # Calculate the distance between the particle and its neighbour
+            # Calculate Euclidean distance between current particle and neighbor
             distance = np.sqrt((x_i - x_j)**2 + (y_i - y_j)**2)
-            # Check if the distance is less than or equal to the sum of their sizes
+            # Check if the distance is less than or equal to the sum of their radius times the tolerance
             if distance <= (size_i + size_j)*tolerance:
-                #print('MAX DIS=' + str(distance))
-                valid_neighbors.append(neighbor_id)
-        # Append the valid neighbors' particle IDs to the updated list
+                valid_neighbors.append(neighbor_id) #keep neighbour if fits requirement
+        # Store valid neighbours for current particle
         updated_neigh_list.append(valid_neighbors)
-
         numneigh.append(len(valid_neighbors))
-    # Replace the 'nearest_neighbors' column with the filtered list of valid neighbors
+        
+    # Replace the 'nearest_neighbours' column with the filtered list of valid neighbours
     df['nearest_neighbors'] = updated_neigh_list
     df.loc[:,'num_neighbors'] = numneigh
     return df
 
+
+#calculate COM from a set of all particle positions
 def Centre_of_Mass(coords):
-    '''Function to calculate the CofM position of a set of particles given list/array of positions'''
     totalx = np.mean(coords[:,0])
     totaly = np.mean(coords[:,1])
     return np.array([totalx,totaly])
 
 
 
-#%% Section: Loading images and setup
+#%% Loading images and setup
 
-# Set up the directory and file paths
-directory = 'D:/Maya/'  # Folder where images are stored
-run = '250612 Oval Droplet Shape 4/'  # Subfolder for this specific experiment
+# Define file paths to locate the image sequence
+directory = 'D:/Maya/'                   # Main directory where your data is stored
+run = '250612 Oval Droplet Shape 4/'     # Subfolder for this specific experiment-------------------
 prefix = '*.tiff'  # File pattern to load TIFF images
-#framei= 3524
-#framef = 5194
-#framei=1563
-#framef=1650
-# framef=1800
-framei=1
-framef=608
 
-# Load a sequence of images and preprocess them
+# Define frame range to analyze (can adjust as needed)-------------------------------------------
+framei = 1                                # Starting frame index
+framef = 10                               # Ending frame index
+
+# Load image sequence using PIMS
 sequence = pims.ImageSequence(os.path.join(directory + run + prefix))
-frames = preprocess_img(sequence[framei:framef])  # Preprocess the first 50 frames
+# Preprocess the loaded image frames using your preprocessing pipeline. Only frames between framei and framef are preprocessed
+frames = preprocess_img(sequence[framei:framef])
 
+#%% Loop through all frames and detect peaks
 
-#%% Section: Loop through all frames and detect peaks
-
-# Initialize a list to store positions
+# Initialize an empty list to store detected circle positions for each frame
 poss = []
 # Loop over each frame (except the last one)
 for i in range(framei,framef-1):
-    img=frames[i-framei]
-    #blur = cv2.GaussianBlur(img, (5, 5), 0)
-    blur=img
-    # Invert if circles are dark on light background (optional, depending on contrast)
-    inv = cv2.bitwise_not(blur)
-    # Apply Hough Circle Transform
+    img=frames[i-framei]     # Get the preprocessed image for the current frame
+    # blur = cv2.GaussianBlur(img, (5, 5), 0)  # Optional Gaussian blur - can be used to smooth image before detection
+    blur=img     # Currently no additional blurring is applied
+    inv = cv2.bitwise_not(blur)     # Invert image colors if needed (useful if droplets are dark on a light background)
+    # Apply Hough Circle Transform to detect circular droplets
     circles = cv2.HoughCircles(
-        blur,
-        cv2.HOUGH_GRADIENT,
-        dp=1.2,            # Inverse ratio of accumulator resolution to image resolution
-        minDist=20,        # Minimum distance between circle centers
-        param1=150,         # Higher threshold for Canny edge detector
-        param2=35,         # Accumulator threshold for circle detection - one you want to change if circles are not being detected
-        minRadius=10,       # Minimum circle radius
-        maxRadius=60       # Maximum circle radius
+        blur,                   # Input image (must be 8-bit grayscale)
+        cv2.HOUGH_GRADIENT,     # Detection method (gradient-based)
+        dp=1.2,                 # Inverse ratio of accumulator resolution to image resolution
+        minDist=20,             # Minimum distance between detected circle centers
+        param1=150,             # High threshold for Canny edge detector (edge detection step)
+        param2=35,              # Accumulator threshold for circle detection (lower = more circles detected, until about 30 where it starts to make up circles)
+        minRadius=10,           # Minimum expected circle radius
+        maxRadius=60            # Maximum expected circle radius
     )
     # Draw circles
-    output = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    output = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)     # Convert image to BGR so circles can be drawn in color for visualization
+    # If any circles were detected in this frame
     if circles is not None:
-        circles = np.uint16(np.around(circles[0]))
+        circles = np.uint16(np.around(circles[0])) # Round circle parameters to integers
+        # Loop through all detected circles
         for x, y, r in circles:
-            cv2.circle(output, (x, y), r, (0, 255, 0), 2)      # Circle outline
-            cv2.circle(output, (x, y), 2, (255, 255, 255), 3)      # Circle center
-            poss.append([i, x,y,r])
+            cv2.circle(output, (x, y), r, (0, 255, 0), 2)       # Draw detected circle outline (green)
+            cv2.circle(output, (x, y), 2, (255, 255, 255), 3)     # Draw detected circle center (white dot (tiny circle))
+            poss.append([i, x, y, r])             # Store frame number, center coordinates, and radius into list
+
+ # Occasionally print frame progress every 100 frames
     if (i%100==0):        
         print('Frame = ' + str(i))
     # Show result
@@ -254,41 +238,61 @@ for i in range(framei,framef-1):
         plt.ylim(100,1100)
         plt.axis('on')
         plt.show()
-# Convert the list of positions into a pandas DataFrame
+# After processing all frames, convert the collected positions into a pandas DataFrame
 positions = pd.DataFrame(poss, columns=['frame', 'x', 'y','size'])
 
-#%%
+#%% Trying to detect only valid droplets
+'''
 img=frames[-1]
-t_lower = 50  
-t_upper = 150 
-edge = cv2.Canny(img, t_lower, t_upper)
-cv2.imshow('original', img)
-cv2.imshow('edge', edge)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+t_lower = 50     # Lower threshold for edge linking
+t_upper = 150    # Upper threshold for strong edge detection
+edge = cv2.Canny(img, t_lower, t_upper) # Apply Canny edge detection to highlight edges in the image
+cv2.imshow('original', img) # Display original image in a separate window
+cv2.imshow('edge', edge) # Display edge-detected image in a separate window
+cv2.waitKey(0)# Wait for any key press to close the image windows
+cv2.destroyAllWindows() # Close all OpenCV image windows after key press
 
+'''
 
-#%% Section: Track droplets across frames
+#%% Track droplets across frames
 
-# Use trackpy to link the positions across frames into trajectories
-t = tp.link_df(positions, search_range=50,
-               adaptive_stop=5, adaptive_step=0.99, memory=30)
+# Use trackpy to link detected droplet positions across frames into trajectories
+t = tp.link_df(
+    positions,      # DataFrame of detected droplet positions (from Hough transform)
+    search_range=50,    # Maximum distance a droplet can move between frames (in pixels)
+    adaptive_stop=5,    # Allows dynamic adjustment of search range after 5 frames
+    adaptive_step=0.99, # Adjustment factor for adaptive search range
+    memory=30           # Number of frames a droplet can disappear and still be linked
+)
 
-# (Optional) Filter out short-lived tracks, e.g.:
-# t = tp.filter_stubs(t, 10)
-trajsavedir = 'D:/Maya/Dataframes/'
-trajsavename = run[:-1] + '_V3'
-# Save trajectories to CSV
+# Optional: Filter out short-lived trajectories that exist for fewer than 10 frames
+# t = tp.filter_stubs(t, 10)   ###uncomment this line if you want to apply filtering-------------
+
+# Set up directory and filename for saving the trajectories
+trajsavedir = 'D:/Maya/Dataframes/'      # Folder to save output CSV files
+trajsavename = run[:-1] + '_V3'          # Generate filename based on run name------------------------
+
+# Save the full trajectory dataframe to CSV for later analysis
 t.to_csv(trajsavedir + trajsavename + '.csv')
 
-#%%Load trajectory Dataframe
-folder = 'D:/Maya/Dataframes/'
-filename = trajsavename + '.csv'
-#filename = '250528 COM Testing 1_V1.csv'
-traj_df_loaded = pd.read_csv(folder + filename,header = 0,index_col=0)
+
+#%% Load trajectory DataFrame
+
+folder = 'D:/Maya/Dataframes/'  # Define folder where trajectory CSV files are stored
+filename = trajsavename + '.csv' # Build the filename from previously defined 'trajsavename'
+traj_df_loaded = pd.read_csv(folder + filename, header=0, index_col=0) # Load the saved trajectory data from CSV into a pandas DataFrame
 
 
-#%%Sort by particle
+
+
+
+
+
+
+
+
+
+#%%Sort by particle----------------------------------------------------------------------------
 particles = traj_df_loaded['particle'].unique()
 r_av_list = []
 for p in traj_df_loaded['particle'].unique():
