@@ -173,11 +173,10 @@ def filter_neighbors_by_size(info,tolerance=1.1):
 
 
 #calculate COM from a set of all particle positions
-def Centre_of_Mass(coords):
+def Centre(coords):
     totalx = np.mean(coords[:,0])
     totaly = np.mean(coords[:,1])
     return np.array([totalx,totaly])
-
 
 
 #%% Loading images and setup
@@ -241,7 +240,7 @@ for i in range(framei,framef-1):
 # After processing all frames, convert the collected positions into a pandas DataFrame
 positions = pd.DataFrame(poss, columns=['frame', 'x', 'y','size'])
 
-#%% Trying to detect only valid droplets
+#%% Testing to detect only valid droplets
 '''
 img=frames[-1]
 t_lower = 50     # Lower threshold for edge linking
@@ -270,7 +269,7 @@ t = tp.link_df(
 
 # Set up directory and filename for saving the trajectories
 trajsavedir = 'D:/Maya/Dataframes/'      # Folder to save output CSV files
-trajsavename = run[:-1] + '_V3'          # Generate filename based on run name------------------------
+trajsavename = run[:-1] + '_V3'          # Generate filename based on run name-------------------------------------
 
 # Save the full trajectory dataframe to CSV for later analysis
 t.to_csv(trajsavedir + trajsavename + '.csv')
@@ -284,179 +283,193 @@ traj_df_loaded = pd.read_csv(folder + filename, header=0, index_col=0) # Load th
 
 
 
+#%% Sort by particle 
 
+particles = traj_df_loaded['particle'].unique() # Get a list of unique particle IDs from the trajectory DataFrame
+r_av_list = [] # Initialize a list to store the average radius for each particle
 
-
-
-
-
-
-
-#%%Sort by particle----------------------------------------------------------------------------
-particles = traj_df_loaded['particle'].unique()
-r_av_list = []
+# Loop over each unique particle
 for p in traj_df_loaded['particle'].unique():
-    print(p)
-    particledf = traj_df_loaded[traj_df_loaded['particle']==p]
+    #print(p)  # Print particle ID (for tracking progress/debugging)
+    particledf = traj_df_loaded[traj_df_loaded['particle'] == p]     # Filter the DataFrame for only the current particle
+    # Calculate the average radius (size) of that particle over all frames
     r_average = np.mean(particledf['size'].to_numpy())
     r_av_list.append(r_average)
-    # print(r_average)
+    #print(r_average)  # Print r average (for tracking progress/debugging)
+# Convert the list of average radii into a NumPy array
 r_av_list = np.array(r_av_list)
-    
-Sizedf = pd.DataFrame(data=list(zip(particles,r_av_list)),columns = ['ID','r'])
-maxr=Sizedf['r'].max()
 
-findNNdf(traj_df_loaded, 40)   
-radius_map = dict(zip(particles,r_av_list)) #Based on Average from Hough Circle Fit
-# radius_map = dict(zip(particles,r_centres_list))
-#Update to use appropriate Radii
-traj_df_loaded['size']=traj_df_loaded['particle'].map(radius_map)
+Sizedf = pd.DataFrame(data=list(zip(particles, r_av_list)), columns=['ID', 'r']) # Create a new DataFrame that maps particle ID to average radius
+maxr = Sizedf['r'].max() # Find the largest average radius (used for neighbor search later)
 
+# Run nearest-neighbor detection once on the full DataFrame.This adds 'nearest_neighbors' and 'num_neighbors' columns to traj_df_loaded,
+findNNdf(traj_df_loaded, 40) # might not be used???????----------------------------------------------------
 
-frames_data = []
-tol = 1.03
-# for f in frametest:
+radius_map = dict(zip(particles, r_av_list)) # Create a dictionary that maps each particle ID to its average radius, pairing the two
+traj_df_loaded['size'] = traj_df_loaded['particle'].map(radius_map) # Update the 'size' column in the original DataFrame to use this average radius instead of per-frame values
+
+frames_data = [] # Initialize a list to store neighbor-filtered data for each frame
+tol = 1.03   # Set tolerance for neighbor size comparison (used to filter close-enough neighbors)
+
+# Loop through each frame in the dataset
 for f in traj_df_loaded['frame'].unique():
-    print('FRAME:' + str(f))
-    framedf =   traj_df_loaded[traj_df_loaded['frame']==f]
-    trajnew=findNNdf(framedf, maxr*2.5)   
-    t=filter_neighbors_by_size(trajnew,tolerance=tol)
-    t['frame'] = f
+    #print('FRAME:' + str(f))  # Print frame number for tracking progress
+    framedf = traj_df_loaded[traj_df_loaded['frame'] == f]     # Filter the data for just this frame
+    trajnew = findNNdf(framedf, maxr * 2.5)     # Find initial nearest neighbors using KDTree with a radius based on max particle size
+    t = filter_neighbors_by_size(trajnew, tolerance=tol)     # Filter neighbors based on proximity and particle size similarity
+    t['frame'] = f     # Add frame number back to the filtered DataFrame (since it gets detached in processing)
     
-    # Append the DataFrame to the list
-    frames_data.append(t)
-    # print(t)
-    
+    frames_data.append(t)     # Add this frame's processed data to the list
+# Combine all frame-level DataFrames into a single full trajectory DataFrame
 traj_df = pd.concat(frames_data, ignore_index=True)
 
 
-#%% updated COM calculation
-COM = []
-traj_df['volume']=traj_df['size']**3
+#%% COM calculation
 
+# Initialize an empty list to store COM values for each frame
+COM = []
+traj_df['volume']=traj_df['size']**3 # Calculate the volume of each droplet by cubing its size (4/3 cancels out later)
+
+# Loop through each unique frame in the trajectory DataFrame
 for f in traj_df['frame'].unique():
-    frame_data = traj_df[traj_df['frame'] == f]
-    total_vol = frame_data['volume'].sum()
+    frame_data = traj_df[traj_df['frame'] == f]     # Extract all particles in the current frame
+    total_vol = frame_data['volume'].sum()     # Calculate the total volume of all particles in this frame
+    # Compute the volume-weighted average x and y coordinates (COM position)
     COMx = np.sum(frame_data.x*frame_data.volume) / total_vol
     COMy = np.sum(frame_data.y*frame_data.volume) / total_vol
+    
+    # Store the COM coordinates and corresponding frame number in a list
     COM.append((COMx,COMy,f))
+# Convert the list of COM values into a pandas DataFrame with labeled columns
 COM_df = pd.DataFrame(COM, columns=['x', 'y', 'frame'])
 
 
 #%%Separation by frame
-particles = traj_df['particle'].unique()
-# tolerance = 0.00
-frametest = [1563]
-BondsList = []
-SepList = []
-Goodframes = []
-XList = []
-YList = []
 
-# for f in frametest:
-#Loop through each frame
+particles = traj_df['particle'].unique() # Get all unique particle IDs in the dataset
+
+# Initialize lists to store data for each frame
+BondsList = []   # Number of particle-particle bonds per frame
+SepList = []     # Mean separation per frame
+Goodframes = []  # Frames successfully analyzed
+XList = []       # Center of mass x-coordinate
+YList = []       # Center of mass y-coordinate
+
+#Loop through each frame in the dataset
 for f in traj_df['frame'].unique():
+    # Filter data for the current frame
     framedf =   traj_df[traj_df['frame']==f]
     particlesf = framedf['particle'].unique()
    
+    # Initialize metrics for this frame
     Bonds = 0  #Variable to count num of bonds
     Mean_Sep = 0
     Count_Pairs = 0
     Good_frame = f
-    CofM = Centre_of_Mass(framedf[['x','y']].to_numpy())
-    XList.append(CofM[0])
-    YList.append(CofM[1])
+       
+    # Calculate geometric centre
+    Cen = Centre(framedf[['x','y']].to_numpy())
+    XList.append(Cen[0])
+    YList.append(Cen[1])
+    
 
     #Loop through each unique particle pairing
     for i in  particlesf:
-        for j in particlesf:
-          
+        for j in particlesf: #avoid double counting
             if (j > i):
+                # Extract position info for particle i and j
                 particleAdf = framedf[framedf['particle']==i]
                 particleBdf = framedf[framedf['particle']==j]
                 #Calculate particle separation
                 sep = np.sqrt((particleAdf['x'].iloc[0] - particleBdf['x'].iloc[0])**2 + 
                               (particleAdf['y'].iloc[0] - particleBdf['y'].iloc[0])**2)
-                # print(sep,i,j,f)
-                Mean_Sep += sep
-                #If separation is less than slightly more than sum of radii, say we have a contact
+                Mean_Sep += sep  # Accumulate separation for averaging
+                
+                # Check if particles are in contact (within scaled sum of radii)
                 if (sep <= (Sizedf[Sizedf['ID']==i]['r'].iloc[0] + 
                     Sizedf[Sizedf['ID']==j]['r'].iloc[0]) * (tol)):
                     Contact = True
-                    Bonds += 1
+                    Bonds += 1  # Count as a bond if close enough
                 else:
                     Contact = False
-                # print(sep,i,j,f,Contact)
-                Count_Pairs +=1
-    Mean_Sep = Mean_Sep/Count_Pairs
+                Count_Pairs += 1  # Keep track of how many pairs checked
+
+    Mean_Sep = Mean_Sep/Count_Pairs        # Average separation across all pairs in this frame
+    # Record metrics for the frame
     BondsList.append(Bonds)
     SepList.append(Mean_Sep)
     Goodframes.append(Good_frame)
-        
-        
-        
-Bondsdf = pd.DataFrame(data=list(zip(Goodframes,BondsList,SepList, XList, YList)),columns = ['frame','Num_Bonds','Mean_Sep', 'CofM_X','CofM_Y'])        
-        
+# Store all collected metrics into a DataFrame for further analysis and plotting        
+Bondsdf = pd.DataFrame(data=list(zip(Goodframes,BondsList,SepList, XList, YList)),columns = ['frame','Num_Bonds','Mean_Sep', 'Centre_X','Centre_Y'])        
+
 #%% Plot number of bonds per frame
 
-plt.figure(figsize=(10, 6))
-plt.plot(Bondsdf['frame'], Bondsdf['Num_Bonds'], marker='o',linestyle='none')
+plt.figure(figsize=(10, 6)) # Create a new figure with a specific size
+plt.plot(Bondsdf['frame'], Bondsdf['Num_Bonds'], marker='o', linestyle='none') # Plot the number of bonds in each frame (as individual points, no connecting lines)
 plt.title('Number of Bonds per Frame')
 plt.xlabel('Frame')
 plt.ylabel('Number of Bonds')
 plt.grid(True)
-plt.show()
+plt.show() # Display the plot
 
-#%% Distance between droplets
+#%% Plot distance between droplets
 
-plt.figure(figsize=(10, 6))
-plt.plot(Bondsdf['frame'], Bondsdf['Mean_Sep'], marker='o',linestyle='none')
+plt.figure(figsize=(10, 6)) # Create a new figure with a specific size
+plt.plot(Bondsdf['frame'], Bondsdf['Mean_Sep'], marker='o', linestyle='none') # Plot the mean separation distance between particles per frame (individual points)
 plt.title('Distance Between Droplets')
 plt.xlabel('Frame')
 plt.ylabel('Distance')
 plt.grid(True)
-plt.show()
+plt.show() # Display the plot
 
-#%%For plotting bonds
+#%% Plotting droplets and bonds
 
-connections=[]
-norm = mpl.colors.Normalize(vmin = -10,vmax = particles[-1]+10)
-cmap = plt.get_cmap('hsv')
-#colorlist = ['dodgerblue','hotpink','darkorange','mediumseagreen']
-# Iterate over each unique frame
+connections=[]  # List to store the figure objects for each plotted frame
+# Set up color normalization and colormap for visualizing different particles
+norm = mpl.colors.Normalize(vmin=particles.min(), vmax=particles.max()) # Create a normalization object that maps particle IDs (from min to max) onto a [0, 1] scale
+cmap = plt.get_cmap('hsv') # Choose a colormap ('hsv') that spans the full hue spectrum, giving a rainbow-like set of colors
+#colorlist = ['dodgerblue','hotpink','darkorange','mediumseagreen'] #use if only working with a small amount of droplets to assign colours
+
+# Iterate over each unique frame 
 for k,f in enumerate(Goodframes):
-    if (k % 5 == 0):
-        framedf = traj_df[traj_df['frame'] == f]
-        particlesf = framedf['particle'].unique()
+    if (k % 5 == 0):  # Only plot every 5th frame to reduce clutter
+        framedf = traj_df[traj_df['frame'] == f] # Get particle data for the current frame
+        particlesf = framedf['particle'].unique() # List of unique particle IDs in this frame
        
-        
-        # Create a new figure
-        fig, ax = plt.subplots(figsize=(6, 6))
-        
-        # Plot each particle
+        fig, ax = plt.subplots(figsize=(6, 6))        # Create a new figure for plotting
+
+        # Plot each particle as a circle
         for j,p in enumerate(particlesf):
-            print(j)
-            color = cmap(norm(p))
-            #color = colorlist[j]
-            circle = mpl.patches.Circle((framedf[framedf['particle'] == p]['x'].iloc[0],framedf[framedf['particle'] == p]['y'].iloc[0]),
-                                        Sizedf[Sizedf['ID']==p]['r'].iloc[0],facecolor=color)
-            ax.add_patch(circle)
-            
-        # ax.scatter(framedf['x'], framedf['y'], s=framedf['size']*800, c=framedf['particle'], cmap='inferno',norm=norm,label='Parti!cles')
-        X_Mid = Bondsdf[Bondsdf['frame']==f]['CofM_X'].iloc[0]
-        Y_Mid = Bondsdf[Bondsdf['frame']==f]['CofM_Y'].iloc[0]
-        w = 200
-        plt.xlim(X_Mid-w,X_Mid+w)
-        plt.ylim(Y_Mid-w,Y_Mid+w)
-        # Plot lines between neighbors
-        for i, row in framedf.iterrows():
-            x_i, y_i = row['x'], row['y']
-            for neighbor_id in row['nearest_neighbors']:
-                neighbor_row = framedf[framedf['particle'] == neighbor_id].iloc[0]
-                x_j, y_j = neighbor_row['x'], neighbor_row['y']
-                plt.plot([x_i, x_j], [y_i, y_j], linestyle='dotted',linewidth=5, color = 'dimgrey',alpha=0.9)  # 'k-' is the color black with solid lines
-    
+            color = cmap(norm(p)) # Assign a unique color based on particle ID
+            #color = colorlist[j] # use if working with colorlist not cmap
+            # Create a matplotlib circle patch at the particle's position with its radius
+            circle = mpl.patches.Circle(
+                (framedf[framedf['particle'] == p]['x'].iloc[0],   # X-coordinate of particle p
+                 framedf[framedf['particle'] == p]['y'].iloc[0]),  # Y-coordinate of particle p
+                Sizedf[Sizedf['ID'] == p]['r'].iloc[0],            # Radius of particle p
+                facecolor=color                                    # Fill color based on particle ID
+                  )
+            ax.add_patch(circle)      # Add this particle circle to the current plot
+              
+        # Get center of mass for this frame and set plot limits to center around it*************************************************
+        X_Mid = Bondsdf[Bondsdf['frame']==f]['Centre_X'].iloc[0] # Get the X-coordinate of geometrical centre for the current frame from `Bondsdf`
+        Y_Mid = Bondsdf[Bondsdf['frame']==f]['Centre_Y'].iloc[0] # Get the Y-coordinate of geometrical centre for the current frame
+        w = 400  # Half-width/height of the viewing window
+        plt.xlim(X_Mid-w,X_Mid+w) # Set X-axis limits to zoom in on region centered around the geometrical centre
+        plt.ylim(Y_Mid-w,Y_Mid+w) # Set Y-axis limits similarly
         
+        # Draw dotted lines between each particle and its nearest neighbuors
+        for i, row in framedf.iterrows():
+            x_i, y_i = row['x'], row['y']  # Get the (x, y) position of this particle
+            for neighbor_id in row['nearest_neighbors']:     # For each of its nearest neighbours...
+                neighbor_row = framedf[framedf['particle'] == neighbor_id].iloc[0]
+                x_j, y_j = neighbor_row['x'], neighbor_row['y']         # Get the (x, y) position of the neighbour
+                # Draw a dotted line between the particle and its neighbour
+                plt.plot([x_i, x_j], [y_i, y_j],
+                         linestyle='dotted',
+                         linewidth=5,
+                         color='dimgrey',
+                         alpha=0.9)
         # Set plot title and labels
         ax.set_title(f"Particle Network - Frame {f}")
         ax.set_xlabel("X Coordinate")
@@ -464,16 +477,10 @@ for k,f in enumerate(Goodframes):
         
         # Store the figure in the list
         connections.append(fig)
-        plt.show()
-        
-        #savedir = 'D:/Maya/Plots/' + 'Network Plot 250520 4 Drop 2/'
-        #savename = run[:-1] + '_Network_Plot_frame_' + str(f)
-        #plt.savefig(savedir + savename + '.png',dpi = 200,bbox_inches = 'tight')
-        
-        plt.close()
+        plt.show()  # Display the current plot
+        plt.close()  # Close the figure to free up memory
 
-
-#%%For plotting bonds averaged
+#%% Plotting droplets and bonds averaged
 
 connections=[]
 norm = mpl.colors.Normalize(vmin = -10,vmax = particles[-1]+10)
@@ -527,8 +534,8 @@ for k,f in enumerate(Goodframes):
             ax.add_patch(circle)
         
         # ax.scatter(framedf['x'], framedf['y'], s=framedf['size']*800, c=framedf['particle'], cmap='inferno',norm=norm,label='Parti!cles')
-        X_Mid = Bondsdf[Bondsdf['frame']==f]['CofM_X'].iloc[0]
-        Y_Mid = Bondsdf[Bondsdf['frame']==f]['CofM_Y'].iloc[0]
+        X_Mid = Bondsdf[Bondsdf['frame']==f]['Centre_X'].iloc[0]
+        Y_Mid = Bondsdf[Bondsdf['frame']==f]['Centre_Y'].iloc[0]
         w = 200
         plt.xlim(X_Mid-w,X_Mid+w)
         plt.ylim(Y_Mid-w,Y_Mid+w)
@@ -555,7 +562,145 @@ for k,f in enumerate(Goodframes):
         # Store the figure in the list
         connections.append(fig)
         plt.show()
+  
         
+  
+#%% KEEP
+
+connections=[]  # List to store the figure objects for each plotted frame
+# Set up color normalization and colormap for visualizing different particles
+norm = mpl.colors.Normalize(vmin=particles.min(), vmax=particles.max()) # Create a normalization object that maps particle IDs (from min to max) onto a [0, 1] scale
+cmap = plt.get_cmap('hsv') # Choose a colormap ('hsv') that spans the full hue spectrum, giving a rainbow-like set of colors
+#colorlist = ['dodgerblue','hotpink','darkorange','mediumseagreen'] #use if only working with a small amount of droplets to assign colours
+
+# Iterate over each unique frame 
+for k,f in enumerate(Goodframes):
+    if (k % 5 == 0):  # Only plot every 5th frame to reduce clutter
+        print('Working on frame: '+str(f))
+        framedf = traj_df[traj_df['frame'] == f] # Get particle data for the current frame
+        particlesf = framedf['particle'].unique() # List of unique particle IDs in this frame
+       
+        fig, ax = plt.subplots(figsize=(6, 6))        # Create a new figure for plotting
+
+        # Plot each particle as a circle
+        for j,p in enumerate(particlesf):
+            color = cmap(norm(p)) # Assign a unique color based on particle ID
+            #color = colorlist[j] # use if working with colorlist not cmap
+            # Create a matplotlib circle patch at the particle's position with its radius
+            circle = mpl.patches.Circle(
+                (framedf[framedf['particle'] == p]['x'].iloc[0],   # X-coordinate of particle p
+                 framedf[framedf['particle'] == p]['y'].iloc[0]),  # Y-coordinate of particle p
+                Sizedf[Sizedf['ID'] == p]['r'].iloc[0],            # Radius of particle p
+                facecolor=color                                    # Fill color based on particle ID
+                  )
+            ax.add_patch(circle)      # Add this particle circle to the current plot
+              
+        # Get center of mass for this frame and set plot limits to center around it*************************************************
+        X_Mid = Bondsdf[Bondsdf['frame']==f]['Centre_X'].iloc[0] # Get the X-coordinate of geometrical centre for the current frame from `Bondsdf`
+        Y_Mid = Bondsdf[Bondsdf['frame']==f]['Centre_Y'].iloc[0] # Get the Y-coordinate of geometrical centre for the current frame
+        w = 400  # Half-width/height of the viewing window
+        plt.xlim(X_Mid-w,X_Mid+w) # Set X-axis limits to zoom in on region centered around the geometrical centre
+        plt.ylim(Y_Mid-w,Y_Mid+w) # Set Y-axis limits similarly
+        
+        # Draw dotted lines between each particle and its nearest neighbuors
+        for i, row in framedf.iterrows():
+            x_i, y_i = row['x'], row['y']  # Get the (x, y) position of this particle
+            for neighbor_id in row['nearest_neighbors']:     # For each of its nearest neighbours...
+                neighbor_row = framedf[framedf['particle'] == neighbor_id].iloc[0]
+                x_j, y_j = neighbor_row['x'], neighbor_row['y']         # Get the (x, y) position of the neighbour
+                # Draw a dotted line between the particle and its neighbour
+                plt.plot([x_i, x_j], [y_i, y_j],
+                         linestyle='dotted',
+                         linewidth=5,
+                         color='dimgrey',
+                         alpha=0.9)
+        # Set plot title and labels
+        ax.set_title(f"Particle Network - Frame {f}")
+        ax.set_xlabel("X Coordinate")
+        ax.set_ylabel("Y Coordinate")
+        
+        # Store the figure in the list
+        connections.append(fig)
+        plt.show()  # Display the current plot
+        plt.close()  # Close the figure to free up memory
+ 
+
+
+
+#%% Combined version
+#%% Optional: Smooth positions across time for averaged plotting
+for f in Goodframes:
+    framedf = traj_df[traj_df['frame'] == f]
+    for p in framedf['particle'].unique():
+        posnew = []
+        for i in range(-2, 3):
+            tempdf = traj_df[traj_df['frame'] == f + i]
+            row = tempdf[tempdf['particle'] == p]
+            if not row.empty:
+                posnew.append(row[['x', 'y']].iloc[0].tolist())
+        if len(posnew) == 5:
+            avg_x = sum(pos[0] for pos in posnew) / 5
+            avg_y = sum(pos[1] for pos in posnew) / 5
+            traj_df.loc[(traj_df['particle'] == p) & (traj_df['frame'] == f), ['xsm', 'ysm']] = [avg_x, avg_y]
+
+# General plotting function
+def plot_frame(f, use_smoothed=False, window_size=400):
+    framedf = traj_df[traj_df['frame'] == f]
+    particlesf = framedf['particle'].unique()
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    for j, p in enumerate(particlesf):
+        color = cmap(norm(p))
+        particle_row = framedf[framedf['particle'] == p]
+
+        # Use smoothed coords if requested and available, else raw coords
+        if use_smoothed and 'xsm' in particle_row.columns and not pd.isna(particle_row['xsm'].iloc[0]):
+            x = particle_row['xsm'].iloc[0]
+            y = particle_row['ysm'].iloc[0]
+        else:
+            x = particle_row['x'].iloc[0]
+            y = particle_row['y'].iloc[0]
+
+        r = Sizedf[Sizedf['ID'] == p]['r'].iloc[0]
+        circle = mpl.patches.Circle((x, y), r, facecolor=color)
+        ax.add_patch(circle)
+
+    # Draw neighbor connections
+    for _, row in framedf.iterrows():
+        for neighbor_id in row['nearest_neighbors']:
+            neighbor_row = framedf[framedf['particle'] == neighbor_id].iloc[0]
+
+            # Choose which coords to plot for neighbors
+            if use_smoothed and ('xsm' in row and 'xsm' in neighbor_row) and \
+               (not pd.isna(row['xsm']) and not pd.isna(neighbor_row['xsm'])):
+                x_coords = [row['xsm'], neighbor_row['xsm']]
+                y_coords = [row['ysm'], neighbor_row['ysm']]
+                line_color = 'red'
+            else:
+                x_coords = [row['x'], neighbor_row['x']]
+                y_coords = [row['y'], neighbor_row['y']]
+                line_color = 'dimgrey'
+
+            ax.plot(x_coords, y_coords, linestyle='dotted', linewidth=5, color=line_color, alpha=0.9)
+
+    # Center the plot
+    X_Mid = Bondsdf[Bondsdf['frame'] == f]['Centre_X'].iloc[0]
+    Y_Mid = Bondsdf[Bondsdf['frame'] == f]['Centre_Y'].iloc[0]
+    ax.set_xlim(X_Mid - window_size, X_Mid + window_size)
+    ax.set_ylim(Y_Mid - window_size, Y_Mid + window_size)
+
+    ax.set_title(f"Particle Network - Frame {f} {'(Smoothed)' if use_smoothed else '(Raw)'}")
+    ax.set_xlabel("X Coordinate")
+    ax.set_ylabel("Y Coordinate")
+    plt.show()
+    plt.close()
+
+for f in Goodframes[2:-2]:  # Ensure full 5-frame window exists
+    if f % 5 == 0:
+        plot_frame(f, use_smoothed=False)
+        plot_frame(f, use_smoothed=True)
+
+
 #%% Bonds plot for average vs every bond
 
 particles = traj_df['particle'].unique()
