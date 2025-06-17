@@ -513,14 +513,11 @@ for k,f in enumerate(Goodframes):
       traj_df.loc[(traj_df['particle'] == p) & (traj_df['frame'] == f), 'xsm'] = avg_x
       traj_df.loc[(traj_df['particle'] == p) & (traj_df['frame'] == f), 'ysm'] = avg_y  
     
-    
-    
 for k,f in enumerate(Goodframes):
     if (k % 5 == 0):
         framedf = traj_df[traj_df['frame'] == f]
         particlesf = framedf['particle'].unique()
-       
-        
+              
         # Create a new figure
         fig, ax = plt.subplots(figsize=(6, 6))
         
@@ -536,7 +533,7 @@ for k,f in enumerate(Goodframes):
         # ax.scatter(framedf['x'], framedf['y'], s=framedf['size']*800, c=framedf['particle'], cmap='inferno',norm=norm,label='Parti!cles')
         X_Mid = Bondsdf[Bondsdf['frame']==f]['Centre_X'].iloc[0]
         Y_Mid = Bondsdf[Bondsdf['frame']==f]['Centre_Y'].iloc[0]
-        w = 200
+        w = 400
         plt.xlim(X_Mid-w,X_Mid+w)
         plt.ylim(Y_Mid-w,Y_Mid+w)
         # Plot lines between neighbors
@@ -562,8 +559,6 @@ for k,f in enumerate(Goodframes):
         # Store the figure in the list
         connections.append(fig)
         plt.show()
-  
-        
   
 #%% KEEP
 
@@ -624,11 +619,8 @@ for k,f in enumerate(Goodframes):
         plt.show()  # Display the current plot
         plt.close()  # Close the figure to free up memory
  
-
-
-
 #%% Combined version
-#%% Optional: Smooth positions across time for averaged plotting
+# Optional: Smooth positions across time for averaged plotting
 for f in Goodframes:
     framedf = traj_df[traj_df['frame'] == f]
     for p in framedf['particle'].unique():
@@ -668,7 +660,11 @@ def plot_frame(f, use_smoothed=False, window_size=400):
     # Draw neighbor connections
     for _, row in framedf.iterrows():
         for neighbor_id in row['nearest_neighbors']:
+            
             neighbor_row = framedf[framedf['particle'] == neighbor_id].iloc[0]
+            x_coords = [row['x'], neighbor_row['x']]
+            y_coords = [row['y'], neighbor_row['y']]
+            line_color = 'dimgrey'
 
             # Choose which coords to plot for neighbors
             if use_smoothed and ('xsm' in row and 'xsm' in neighbor_row) and \
@@ -676,11 +672,12 @@ def plot_frame(f, use_smoothed=False, window_size=400):
                 x_coords = [row['xsm'], neighbor_row['xsm']]
                 y_coords = [row['ysm'], neighbor_row['ysm']]
                 line_color = 'red'
-            else:
+                '''          
+            else: #want this to happen for both --------------------------move above if?
                 x_coords = [row['x'], neighbor_row['x']]
                 y_coords = [row['y'], neighbor_row['y']]
                 line_color = 'dimgrey'
-
+'''
             ax.plot(x_coords, y_coords, linestyle='dotted', linewidth=5, color=line_color, alpha=0.9)
 
     # Center the plot
@@ -699,7 +696,6 @@ for f in Goodframes[2:-2]:  # Ensure full 5-frame window exists
     if f % 5 == 0:
         plot_frame(f, use_smoothed=False)
         plot_frame(f, use_smoothed=True)
-
 
 #%% Bonds plot for average vs every bond
 
