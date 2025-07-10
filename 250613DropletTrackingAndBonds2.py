@@ -37,7 +37,7 @@ from sklearn.neighbors import KDTree  # For efficient nearest neighbour searches
 @pims.pipeline
 def preprocess_img(frame):
     # Crop the image to focus on the region of interest and avoid processing unnecessary parts ------------------
-    frame = frame[0:1200, 0:1500]
+    frame = frame[0:1300, 0:1600]
     
     #the next few lines are to convert a RGBA image into a grayscale image
     # If the image has 4 channels (RGBA), convert it to RGB
@@ -55,16 +55,16 @@ def preprocess_img(frame):
     
     return frame.astype(np.uint8)     # Return the final preprocessed image
 
-
 # Function to plot trajectories up to a specific frame number `k`
-def plotTraj(traj, k, directory, frames,COM):
+def plotTraj(traj, k, directory, frames, COM):
     plt.figure(figsize=(12, 8), dpi=150)  #     # Create a new figure with specified size and resolution
     plt.clf()  # Clear current figure (in case it’s being reused)
-
-    subset = traj[traj.frame <= k]     # Filter the trajectory DataFrame to include only frames up to `k`
+    subset = traj[traj.frame <= k]       # Filter the trajectory DataFrame to include only frames up to `k`
+  
     # Set the limits of the x and y axes to zoom in on region of interest --------------------------------------
     plt.xlim(700,1000)
     plt.ylim(500,900)
+    
     # Plot the center of mass at the current frame 'k'  as a red X
     plt.scatter(COM_df.loc[COM_df['frame'] == k, 'x'].values[0], COM_df.loc[COM_df['frame'] == k, 'y'].values[0],
                 color='red', marker='x', s=100, label='Center of Mass')
@@ -138,7 +138,6 @@ def filter_neighbors_by_size(info,tolerance=1.1):
         df = df.reset_index(drop=True)
         # Retrieve the current list of neighbours IDs for this particle
         neighbors = df[df['particle']==particle_id]['nearest_neighbors'].iloc[0]
-        # print(neighbours)   ##bug checking---------------------------------------------
         # Get the current particle's position and size
         x_i, y_i, size_i = x_coords[i], y_coords[i], sizes[i]
         # Start an empty list for valid neighbours
@@ -177,12 +176,12 @@ def Centre(coords):
 
 # Define file paths to locate the image sequence
 directory = 'D:/Maya/'                   # Main directory where your data is stored
-run = '250618 50 Droplet System/'     # Subfolder for this specific experiment-------------------
+run = '250710 Testing Droplet Tracking/'     # Subfolder for this specific experiment-------------------
 prefix = '*.tiff'  # File pattern to load TIFF images
 
 # Define frame range to analyze (can adjust as needed)-------------------------------------------
-framei = 687                                # Starting frame index
-framef = 800                              # Ending frame index
+framei = 120                                # Starting frame index
+framef = 160                              # Ending frame index
 
 # Load image sequence using PIMS
 sequence = pims.ImageSequence(os.path.join(directory + run + prefix))
@@ -228,8 +227,8 @@ for i in range(framei,framef-1):
     # Show result
         plt.imshow(output)
         plt.title("Hough Circle Detection")
-        plt.xlim(300,1300) #-----------------------------------------------------------------------
-        plt.ylim(200,1000) #------------------------------------------------------------------------
+        plt.xlim(200,1550) #-----------------------------------------------------------------------
+        plt.ylim(0,1250) #------------------------------------------------------------------------
         plt.axis('on')
         plt.show()
 # After processing all frames, convert the collected positions into a pandas DataFrame
@@ -253,11 +252,23 @@ cv2.destroyAllWindows() # Close all OpenCV image windows after key press
 # Use trackpy to link detected droplet positions across frames into trajectories
 t = tp.link_df(
     positions,      # DataFrame of detected droplet positions (from Hough transform)
-    search_range=50,    # Maximum distance a droplet can move between frames (in pixels)
-    adaptive_stop=5,    # Allows dynamic adjustment of search range after 5 frames
+    search_range=100,    # Maximum distance a droplet can move between frames (in pixels)
+    adaptive_stop=50,    # Allows dynamic adjustment of search range after 5 frames
     adaptive_step=0.99, # Adjustment factor for adaptive search range
-    memory=5           # Number of frames a droplet can disappear and still be linked
+    memory=10           # Number of frames a droplet can disappear and still be linked
 )
+
+'''  
+###POTENTIAL OPTION IF IMPROVED TO TRACK USING SIZE INSTREAD
+scale_factor = 200 / 10  # = 20
+positions['size_scaled'] = positions['size'] * scale_factor
+
+t = tp.link_df(
+    positions,
+    search_range=50,
+    pos_columns=['x', 'y', 'size_scaled'],
+    memory=5)
+'''
 
 # Optional: Filter out short-lived trajectories that exist for fewer than 10 frames
 #t = tp.filter_stubs(t, 30)   ###uncomment this line if you want to apply filtering-----------------------
@@ -269,9 +280,7 @@ trajsavename = run[:-1] + '_V1'          # Generate filename based on run name--
 # Save the full trajectory dataframe to CSV for later analysis
 t.to_csv(trajsavedir + trajsavename + '.csv')
 
-
 # Load trajectory DataFrame
-
 folder = 'D:/Maya/Dataframes/'  # Define folder where trajectory CSV files are stored
 filename = trajsavename + '.csv' # Build the filename from previously defined 'trajsavename'
 traj_df_loaded = pd.read_csv(folder + filename, header=0, index_col=0) # Load the saved trajectory data from CSV into a pandas DataFrame
