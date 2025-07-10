@@ -23,6 +23,8 @@ Created on Thu May 15 01:32:31 2025
 ## fix neighbour
 ## theres a section to filter out short lived trajectories - use that for the random circles that appear so we can se bounds lower
 
+#THIS IS THE WORKING CODE EDIT STUFF HERE NOT IN THE ONE WITH THE ArithmeticError
+
 
 import numpy as np #numerical opperations
 import matplotlib.pyplot as plt #plotting graphs and images
@@ -44,7 +46,7 @@ from sklearn.neighbors import KDTree  # For efficient nearest neighbour searches
 @pims.pipeline
 def preprocess_img(frame):
     # Crop the image to focus on the region of interest and avoid processing unnecessary parts ------------------
-    frame = frame[0:1200, 0:1500]
+    frame = frame[0:1300, 0:1600]
     
     #the next few lines are to convert a RGBA image into a grayscale image
     # If the image has 4 channels (RGBA), convert it to RGB
@@ -62,7 +64,21 @@ def preprocess_img(frame):
     
     return frame.astype(np.uint8)     # Return the final preprocessed image
 
+# Function to plot trajectories up to a specific frame number `k`
+def plotTrajold(traj, k, directory, frames,framei):
+    plt.figure(figsize=(12, 8), dpi=150)  # Create a figure
+    plt.clf()  # Clear current figure (in case it’s being reused)
+    plt.ylim(600, 800)  # Set vertical axis limits
+    plt.xlim(700, 1000)  # Set horizontal axis limits
 
+    # Filter the trajectory DataFrame to include only frames up to `k`
+    subset = traj[traj.frame <= k]
+
+    # Plot the trajectories over the background image at frame `k`
+    tp.plot_traj(subset, colorby='particle', cmap=mpl.cm.winter,
+                 superimpose=frames[k-framei], plot_style={'linewidth': 2})
+    
+    
 # Function to plot trajectories up to a specific frame number `k`
 def plotTraj(traj, k, directory, frames,COM):
     plt.figure(figsize=(12, 8), dpi=150)  #     # Create a new figure with specified size and resolution
@@ -145,7 +161,6 @@ def filter_neighbors_by_size(info,tolerance=1.1):
         df = df.reset_index(drop=True)
         # Retrieve the current list of neighbours IDs for this particle
         neighbors = df[df['particle']==particle_id]['nearest_neighbors'].iloc[0]
-        # print(neighbours)   ##bug checking---------------------------------------------
         # Get the current particle's position and size
         x_i, y_i, size_i = x_coords[i], y_coords[i], sizes[i]
         # Start an empty list for valid neighbours
@@ -184,12 +199,12 @@ def Centre(coords):
 
 # Define file paths to locate the image sequence
 directory = 'D:/Maya/'                   # Main directory where your data is stored
-run = '250618 50 Droplet System/'     # Subfolder for this specific experiment-------------------
+run = '250710 Testing Droplet Tracking/'     # Subfolder for this specific experiment-------------------
 prefix = '*.tiff'  # File pattern to load TIFF images
 
 # Define frame range to analyze (can adjust as needed)-------------------------------------------
-framei = 687                                # Starting frame index
-framef = 800                              # Ending frame index
+framei = 120                                # Starting frame index
+framef = 160                              # Ending frame index
 
 # Load image sequence using PIMS
 sequence = pims.ImageSequence(os.path.join(directory + run + prefix))
@@ -235,8 +250,8 @@ for i in range(framei,framef-1):
     # Show result
         plt.imshow(output)
         plt.title("Hough Circle Detection")
-        plt.xlim(300,1300) #-----------------------------------------------------------------------
-        plt.ylim(50,1100) #------------------------------------------------------------------------
+        plt.xlim(200,1550) #-----------------------------------------------------------------------
+        plt.ylim(0,1250) #------------------------------------------------------------------------
         plt.axis('on')
         plt.show()
 # After processing all frames, convert the collected positions into a pandas DataFrame
@@ -252,11 +267,9 @@ cv2.imshow('original', img) # Display original image in a separate window
 cv2.imshow('edge', edge) # Display edge-detected image in a separate window
 cv2.waitKey(0)# Wait for any key press to close the image windows
 cv2.destroyAllWindows() # Close all OpenCV image windows after key press
-
 '''
 
 #%% Track droplets across frames
-
 
 # Use trackpy to link detected droplet positions across frames into trajectories
 t = tp.link_df(
@@ -268,9 +281,7 @@ t = tp.link_df(
 ) 
 
 '''  
-
-
-###OR THE ONE BELOW USING DROPLET SIZE
+###POTENTIAL OPTION IF IMPROVED TO TRACK USING SIZE INSTEAD OR COMBINE TWO
 scale_factor = 200 / 10  # = 20
 positions['size_scaled'] = positions['size'] * scale_factor
 
@@ -278,9 +289,7 @@ t = tp.link_df(
     positions,
     search_range=50,
     pos_columns=['x', 'y', 'size_scaled'],
-    memory=5,
-)
-
+    memory=5)
 '''
 
 # Optional: Filter out short-lived trajectories that exist for fewer than 10 frames
@@ -290,55 +299,31 @@ t = tp.link_df(
 trajsavedir = 'D:/Maya/Dataframes/'      # Folder to save output CSV files
 trajsavename = run[:-1] + '_V1'          # Generate filename based on run name-------------------------------------
 
-# Save the full trajectory dataframe to CSV for later analysis
-t.to_csv(trajsavedir + trajsavename + '.csv')
-
-
 # Load trajectory DataFrame
-
 folder = 'D:/Maya/Dataframes/'  # Define folder where trajectory CSV files are stored
 filename = trajsavename + '.csv' # Build the filename from previously defined 'trajsavename'
 traj_df_loaded = pd.read_csv(folder + filename, header=0, index_col=0) # Load the saved trajectory data from CSV into a pandas DataFrame
 
-#Plotting centres for all frames
-for frame_idx in sorted(t['frame'].unique()):
-    img = frames[frame_idx-framei]
-    centers = t[t['frame'] == frame_idx]
 
-    plt.figure()
-    plt.imshow(img, cmap='gray', zorder=0)
-    plt.scatter(centers['x'], centers['y'],
-                c='r', s=40, edgecolors='white', linewidth=0.5,
-                zorder=1)
-    plt.title(f'Frame {frame_idx}')
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
-    plt.clf() 
-
-img = frames[0]
-centers = t[t['frame'] == framei]
-
+# plot the centres of each circle to ensure all are identified
+img = frames[0]      # Select the first frame image
+centers = t[t['frame'] == framei]       # Select the corresponding centers (particles) for the first frame
+# Plot the image and centers
 plt.figure()
 plt.imshow(img, cmap='gray', zorder=0)
-plt.scatter(centers['x'], centers['y'],
-            c='r', s=40, edgecolors='white', linewidth=0.5,
-            zorder=1)
+plt.scatter(centers['x'], centers['y'], c='r', s=40, edgecolors='white', linewidth=0.5, zorder=1)
 plt.title(f'Frame {framei}')
 plt.axis('off')
 plt.tight_layout()
 plt.show()
-plt.clf() 
+plt.clf()
 
 
+# checking which particles are lost track of and new IDs are assigned
 total_frames = t['frame'].nunique()  # Count of unique frames
-
-# Loop over each unique particle ID
-for pid in t['particle'].unique():
-    # Select rows belonging to this particle id
-    group = t[t['particle'] == pid]
+for pid in t['particle'].unique():      # Loop over each unique particle ID
+    group = t[t['particle'] == pid]    # Select rows belonging to this particle id
     n = len(group)  # Number of frames where this particle appears
-
     # Check if it matches the total frames
     if n != total_frames:
         print(f"Particle {pid} appears in {n}/{total_frames} frames — missing {total_frames - n}")
@@ -346,26 +331,10 @@ for pid in t['particle'].unique():
         print(f"Particle {pid} appears in all {total_frames} frames")
 
 
-
-total_frames = t['frame'].nunique()  # Count of unique frames
-
-for pid in t['particle'].unique():
-    group = t[t['particle'] == pid]
-    frames = sorted(group['frame'].unique()) ##
-    n = len(frames)
-
-    # Compute missing frames within the full range
-    full = list(range(t['frame'].min(), t['frame'].max() + 1))
-    missing = sorted(set(full) - set(frames))
-
-    if n != total_frames:
-        first_missing = missing[0] if missing else None
-        print(f"Particle {pid} appears in {n}/{total_frames} frames — missing {total_frames - n}, first missing: frame {first_missing}")
-    else:
-        print(f"Particle {pid} appears in all {total_frames} frames")
-
-
-
+# plot trajectories of droplets to make sure none are given new IDs 
+for k in np.arange(framei,framef-1, 1): # Loop over frame numbers from framei up to (but not including) framef - 1
+    print(k)  # Print current frame number
+    plotTrajold(t, k, directory, frames,framei)  # Plot trajectory on this frame using the code that doesnt have the centre of mass
     
 #%% Sort by particle 
 
