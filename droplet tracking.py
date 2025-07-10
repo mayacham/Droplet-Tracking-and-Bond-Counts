@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 """
+Created on Tue Jul  8 12:28:52 2025
+
+@author: Kari
+"""
+
+# -*- coding: utf-8 -*-
+"""
 Created on Fri May 16 15:08:10 2025
 
 @author: Kari
@@ -63,8 +70,8 @@ def plotTraj(traj, k, directory, frames,COM):
 
     subset = traj[traj.frame <= k]     # Filter the trajectory DataFrame to include only frames up to `k`
     # Set the limits of the x and y axes to zoom in on region of interest --------------------------------------
-    plt.xlim(700,1000)
-    plt.ylim(500,900)
+    plt.xlim(300,1200)
+    plt.ylim(50,1000)
     # Plot the center of mass at the current frame 'k'  as a red X
     plt.scatter(COM_df.loc[COM_df['frame'] == k, 'x'].values[0], COM_df.loc[COM_df['frame'] == k, 'y'].values[0],
                 color='red', marker='x', s=100, label='Center of Mass')
@@ -229,7 +236,7 @@ for i in range(framei,framef-1):
         plt.imshow(output)
         plt.title("Hough Circle Detection")
         plt.xlim(300,1300) #-----------------------------------------------------------------------
-        plt.ylim(200,1000) #------------------------------------------------------------------------
+        plt.ylim(50,1100) #------------------------------------------------------------------------
         plt.axis('on')
         plt.show()
 # After processing all frames, convert the collected positions into a pandas DataFrame
@@ -250,14 +257,31 @@ cv2.destroyAllWindows() # Close all OpenCV image windows after key press
 
 #%% Track droplets across frames
 
+
 # Use trackpy to link detected droplet positions across frames into trajectories
 t = tp.link_df(
     positions,      # DataFrame of detected droplet positions (from Hough transform)
-    search_range=50,    # Maximum distance a droplet can move between frames (in pixels)
-    adaptive_stop=5,    # Allows dynamic adjustment of search range after 5 frames
+    search_range=100,    # Maximum distance a droplet can move between frames (in pixels)
+    adaptive_stop=50,    # Allows dynamic adjustment of search range after 5 frames
     adaptive_step=0.99, # Adjustment factor for adaptive search range
-    memory=5           # Number of frames a droplet can disappear and still be linked
+    memory=10           # Number of frames a droplet can disappear and still be linked
+) 
+
+'''  
+
+
+###OR THE ONE BELOW USING DROPLET SIZE
+scale_factor = 200 / 10  # = 20
+positions['size_scaled'] = positions['size'] * scale_factor
+
+t = tp.link_df(
+    positions,
+    search_range=50,
+    pos_columns=['x', 'y', 'size_scaled'],
+    memory=5,
 )
+
+'''
 
 # Optional: Filter out short-lived trajectories that exist for fewer than 10 frames
 #t = tp.filter_stubs(t, 30)   ###uncomment this line if you want to apply filtering-----------------------
@@ -276,11 +300,73 @@ folder = 'D:/Maya/Dataframes/'  # Define folder where trajectory CSV files are s
 filename = trajsavename + '.csv' # Build the filename from previously defined 'trajsavename'
 traj_df_loaded = pd.read_csv(folder + filename, header=0, index_col=0) # Load the saved trajectory data from CSV into a pandas DataFrame
 
+#Plotting centres for all frames
+for frame_idx in sorted(t['frame'].unique()):
+    img = frames[frame_idx-framei]
+    centers = t[t['frame'] == frame_idx]
+
+    plt.figure()
+    plt.imshow(img, cmap='gray', zorder=0)
+    plt.scatter(centers['x'], centers['y'],
+                c='r', s=40, edgecolors='white', linewidth=0.5,
+                zorder=1)
+    plt.title(f'Frame {frame_idx}')
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+    plt.clf() 
+
+img = frames[0]
+centers = t[t['frame'] == framei]
+
+plt.figure()
+plt.imshow(img, cmap='gray', zorder=0)
+plt.scatter(centers['x'], centers['y'],
+            c='r', s=40, edgecolors='white', linewidth=0.5,
+            zorder=1)
+plt.title(f'Frame {framei}')
+plt.axis('off')
+plt.tight_layout()
+plt.show()
+plt.clf() 
+
+
+total_frames = t['frame'].nunique()  # Count of unique frames
+
+# Loop over each unique particle ID
+for pid in t['particle'].unique():
+    # Select rows belonging to this particle id
+    group = t[t['particle'] == pid]
+    n = len(group)  # Number of frames where this particle appears
+
+    # Check if it matches the total frames
+    if n != total_frames:
+        print(f"Particle {pid} appears in {n}/{total_frames} frames — missing {total_frames - n}")
+    else:
+        print(f"Particle {pid} appears in all {total_frames} frames")
 
 
 
+total_frames = t['frame'].nunique()  # Count of unique frames
+
+for pid in t['particle'].unique():
+    group = t[t['particle'] == pid]
+    frames = sorted(group['frame'].unique()) ##
+    n = len(frames)
+
+    # Compute missing frames within the full range
+    full = list(range(t['frame'].min(), t['frame'].max() + 1))
+    missing = sorted(set(full) - set(frames))
+
+    if n != total_frames:
+        first_missing = missing[0] if missing else None
+        print(f"Particle {pid} appears in {n}/{total_frames} frames — missing {total_frames - n}, first missing: frame {first_missing}")
+    else:
+        print(f"Particle {pid} appears in all {total_frames} frames")
 
 
+
+    
 #%% Sort by particle 
 
 particles = traj_df_loaded['particle'].unique() # Get a list of unique particle IDs from the trajectory DataFrame
