@@ -23,7 +23,7 @@ Created on Thu May 15 01:32:31 2025
 ## fix neighbour
 ## theres a section to filter out short lived trajectories - use that for the random circles that appear so we can se bounds lower
 
-#THIS IS THE WORKING CODE EDIT STUFF HERE NOT IN THE ONE WITH THE ArithmeticError
+#THIS IS THE WORKING CODE EDIT STUFF HERE NOT IN THE ONE WITH THE TWO
 
 
 import numpy as np #numerical opperations
@@ -45,7 +45,7 @@ from sklearn.neighbors import KDTree  # For efficient nearest neighbour searches
 # Preprocess each image frame: crop, convert to grayscale, sharpen, and normalize
 @pims.pipeline
 def preprocess_img(frame):
-    # Crop the image to focus on the region of interest and avoid processing unnecessary parts ------------------
+    # Crop the image to focus on the region of interest and avoid processing unnecessary parts ---------------------------------
     frame = frame[0:1300, 0:1600]
     
     #the next few lines are to convert a RGBA image into a grayscale image
@@ -57,28 +57,22 @@ def preprocess_img(frame):
         frame = rgb2gray(frame)
     # Convert image values from float (0-1) to 8-bit integers (0-255)
     frame = (frame * 255).astype(np.uint8)
-
     frame = unsharp_mask(frame, radius=2, amount=5)     # Sharpen the image using unsharp masking to enhance droplet features
-
     frame *= 255.0 / frame.max()     # Normalize the sharpened image back to 8-bit range from 0-255
-    
-    return frame.astype(np.uint8)     # Return the final preprocessed image
+    return frame.astype(np.uint8)     # Return the final preprocessed image   
 
-# Function to plot trajectories up to a specific frame number `k`
-def plotTrajold(traj, k, directory, frames,framei):
-    plt.figure(figsize=(12, 8), dpi=150)  # Create a figure
-    plt.clf()  # Clear current figure (in case it’s being reused)
-    plt.ylim(600, 800)  # Set vertical axis limits
-    plt.xlim(700, 1000)  # Set horizontal axis limits
 
-    # Filter the trajectory DataFrame to include only frames up to `k`
-    subset = traj[traj.frame <= k]
-
-    # Plot the trajectories over the background image at frame `k`
+def plotTrajold(traj, k, directory, frames, framei):
+    fig = plt.figure(figsize=(12, 8), dpi=150)  # Create a new figure
+    plt.ylim(600, 800)
+    plt.xlim(700, 1000)
+    plt.title(f"Trajectories up to Frame {k}")
+    subset = traj[traj.frame <= k]                  # Filter the trajectory DataFrame to include only particles from frame 0 up to and including frame `k`
     tp.plot_traj(subset, colorby='particle', cmap=mpl.cm.winter,
-                 superimpose=frames[k-framei], plot_style={'linewidth': 2})
-    
-    
+                 superimpose=frames[k-framei], plot_style={'linewidth': 2}) # Plot the trajectories using trackpy, overlaying them on the corresponding image frame
+    return fig      # Return the figure object so it can be saved or closed outside this function
+
+
 # Function to plot trajectories up to a specific frame number `k`
 def plotTraj(traj, k, directory, frames,COM):
     plt.figure(figsize=(12, 8), dpi=150)  #     # Create a new figure with specified size and resolution
@@ -98,6 +92,38 @@ def plotTraj(traj, k, directory, frames,COM):
     tp.plot_traj(subset, colorby='particle', cmap=mpl.cm.winter,
                  superimpose=frames[k-framei], plot_style={'linewidth': 2})
     
+    
+def findareas(trajectories):
+    plt.figure(figsize=(8, 8))
+    unique_particles = trajectories['particle'].unique()
+    areas=[]
+    for particle_id in unique_particles:
+        part = trajectories[trajectories['particle'] == particle_id]
+        # Skip if too few points to form a loop
+        if len(part) < 3:
+            continue
+        x = part['x'].values
+        y = part['y'].values
+        # Close the loop
+        x_closed = np.append(x, x[0])
+        y_closed = np.append(y, y[0])
+        # Shoelace formula
+        area = 0.5 * np.abs(np.dot(x_closed[:-1], y_closed[1:]) - np.dot(x_closed[1:], y_closed[:-1]))
+        areas.append(area)
+        # Plot the loop
+        plt.fill(x_closed, y_closed, alpha=0.3, label=f'Particle {particle_id}, Area={area:.2f}')
+        plt.plot(x_closed, y_closed, marker='o', linestyle='-')
+    plt.title('Closed Loops for All Particles')
+    plt.xlabel('x')
+    plt.ylabel('y')
+    plt.axis('equal')
+    plt.grid(True)
+    #plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    #plt.tight_layout()
+    plt.show()
+    return areas
+    
+
 # Function to find nearest neighbours using KDTree for fast and effiecient spatial search
 # adds columns to the dataframe indicating each particle's neighbours and the number of neighbours.
 '''
@@ -194,27 +220,35 @@ def Centre(coords):
     totaly = np.mean(coords[:,1])
     return np.array([totalx,totaly])
 
-
 #%% Loading images and setup
 
 # Define file paths to locate the image sequence
 directory = 'D:/Maya/'                   # Main directory where your data is stored
-run = '250710 Testing Droplet Tracking/'     # Subfolder for this specific experiment-------------------
+run = '250711 Testing Droplet Tracking 4/'     # Subfolder for this specific experiment-------------------------
 prefix = '*.tiff'  # File pattern to load TIFF images
 
-# Define frame range to analyze (can adjust as needed)-------------------------------------------
-framei = 120                                # Starting frame index
-framef = 160                              # Ending frame index
+# Define frame range to analyze (can adjust as needed - must be at least filtering length (30))-----------------------------------------------------------
+framei = 7000                                # Starting frame index
+framef = 9700                              # Ending frame index
+
+version = "_V4 (7000-9700)"                  #for later when saving dataframe --------------------------------------------
 
 # Load image sequence using PIMS
 sequence = pims.ImageSequence(os.path.join(directory + run + prefix))
 # Preprocess the loaded image frames using your preprocessing pipeline. Only frames between framei and framef are preprocessed
 frames = preprocess_img(sequence[framei:framef])
 
+# Set up directory and filename for saving the trajectories and other plots
+trajsavedir = 'D:/Maya/Dataframes/'      # Folder to save output CSV files
+plotsavedir = 'D:/Maya/Plots/'         # Main folder for all plots 
+savename = run[:-1] + version          # Generate filename based on run name and version
+
+filesavedir = os.path.join(plotsavedir, savename)  # Creates a path for your run's folder
+os.makedirs(filesavedir, exist_ok=True)             # Creates a folder needed to later save images
+
 #%% Loop through all frames and detect peaks
 
-# Initialize an empty list to store detected circle positions for each frame
-poss = []
+poss = []       # Initialize an empty list to store detected circle positions for each frame
 # Loop over each frame (except the last one)
 for i in range(framei,framef-1):
     img=frames[i-framei]     # Get the preprocessed image for the current frame
@@ -243,33 +277,22 @@ for i in range(framei,framef-1):
             cv2.circle(output, (x, y), 2, (255, 255, 255), 3)     # Draw detected circle center (white dot (tiny circle))
             poss.append([i, x, y, r])             # Store frame number, center coordinates, and radius into list
 
- # Occasionally print frame progress every 100 frames
+ # Occasionally print frame progress every x frames
     #if (i%100==0):        
     if (i%1==0):        
         print('Frame = ' + str(i))
     # Show result
         plt.imshow(output)
-        plt.title("Hough Circle Detection")
-        plt.xlim(200,1550) #-----------------------------------------------------------------------
-        plt.ylim(0,1250) #------------------------------------------------------------------------
+        plt.title(f"Hough Circle Detection - Frame {i}")
+        # x and y axis of graph ------------------------------------------------------------
+        plt.xlim(200,1550) 
+        plt.ylim(0,1250) 
         plt.axis('on')
         plt.show()
 # After processing all frames, convert the collected positions into a pandas DataFrame
 positions = pd.DataFrame(poss, columns=['frame', 'x', 'y','size'])
 
-# Testing to detect only valid droplets
-'''
-img=frames[-1]
-t_lower = 50     # Lower threshold for edge linking
-t_upper = 150    # Upper threshold for strong edge detection
-edge = cv2.Canny(img, t_lower, t_upper) # Apply Canny edge detection to highlight edges in the image
-cv2.imshow('original', img) # Display original image in a separate window
-cv2.imshow('edge', edge) # Display edge-detected image in a separate window
-cv2.waitKey(0)# Wait for any key press to close the image windows
-cv2.destroyAllWindows() # Close all OpenCV image windows after key press
-'''
 
-#%% Track droplets across frames
 
 # Use trackpy to link detected droplet positions across frames into trajectories
 t = tp.link_df(
@@ -292,20 +315,10 @@ t = tp.link_df(
     memory=5)
 '''
 
-# Optional: Filter out short-lived trajectories that exist for fewer than 10 frames
-#t = tp.filter_stubs(t, 30)   ###uncomment this line if you want to apply filtering-----------------------
+# Optional: Filter out short-lived trajectories that exist for fewer than 30 frames
+t = tp.filter_stubs(t, 30)   #uncomment this line if you want to apply filtering-----------------------
 
-# Set up directory and filename for saving the trajectories
-trajsavedir = 'D:/Maya/Dataframes/'      # Folder to save output CSV files
-trajsavename = run[:-1] + '_V1'          # Generate filename based on run name-------------------------------------
-
-# Load trajectory DataFrame
-folder = 'D:/Maya/Dataframes/'  # Define folder where trajectory CSV files are stored
-filename = trajsavename + '.csv' # Build the filename from previously defined 'trajsavename'
-traj_df_loaded = pd.read_csv(folder + filename, header=0, index_col=0) # Load the saved trajectory data from CSV into a pandas DataFrame
-
-
-# plot the centres of each circle to ensure all are identified
+# plot the centres of each circle to ensure all are identified in the first frame
 img = frames[0]      # Select the first frame image
 centers = t[t['frame'] == framei]       # Select the corresponding centers (particles) for the first frame
 # Plot the image and centers
@@ -318,7 +331,6 @@ plt.tight_layout()
 plt.show()
 plt.clf()
 
-
 # checking which particles are lost track of and new IDs are assigned
 total_frames = t['frame'].nunique()  # Count of unique frames
 for pid in t['particle'].unique():      # Loop over each unique particle ID
@@ -330,12 +342,36 @@ for pid in t['particle'].unique():      # Loop over each unique particle ID
     else:
         print(f"Particle {pid} appears in all {total_frames} frames")
 
-
 # plot trajectories of droplets to make sure none are given new IDs 
-for k in np.arange(framei,framef-1, 1): # Loop over frame numbers from framei up to (but not including) framef - 1
-    print(k)  # Print current frame number
-    plotTrajold(t, k, directory, frames,framei)  # Plot trajectory on this frame using the code that doesnt have the centre of mass
-    
+for k in np.arange(framei, framef-1, 1):
+    fig = plotTrajold(t, k, directory, frames, framei)  # Get the figure from the function
+    fig.savefig(os.path.join(filesavedir, savename + f'_frame_{k}.png'), dpi=300, bbox_inches='tight')  # Save using fig
+    plt.close(fig)
+
+# Save the full trajectory dataframe to CSV for later analysis
+t.to_csv(trajsavedir + savename + '.csv')
+# Load saves trajectory DataFrame from csv into a pandas dataframe
+traj_df_loaded = pd.read_csv(trajsavedir + savename + '.csv', header = 0, index_col = 0)
+
+
+# Area calculations
+
+areas=findareas(t)          #runs the function find areas
+
+averageArea = np.mean(areas)        #calculate the average area for each of the areas in the areas list
+print (averageArea)
+
+
+
+
+
+
+
+
+
+
+
+
 #%% Sort by particle 
 
 particles = traj_df_loaded['particle'].unique() # Get a list of unique particle IDs from the trajectory DataFrame
@@ -667,12 +703,7 @@ def plot_frame(f, use_smoothed=False, window_size=600):
                 x_coords = [row['xsm'], neighbor_row['xsm']]
                 y_coords = [row['ysm'], neighbor_row['ysm']]
                 line_color = 'red'
-                '''          
-            else: #want this to happen for both --------------------------move above if?
-                x_coords = [row['x'], neighbor_row['x']]
-                y_coords = [row['y'], neighbor_row['y']]
-                line_color = 'dimgrey'
-'''
+               
             ax.plot(x_coords, y_coords, linestyle='dotted', linewidth=5, color=line_color, alpha=0.9)
 
     # Center the plot
@@ -783,7 +814,8 @@ def count_white_black_pixels_on_line(img, pt1, pt2, white_threshold=200):
     white_count = np.sum(line_pixels >= white_threshold)
     black_count = np.sum(line_pixels < white_threshold)
     return white_count, black_count
-'''
+
+
 # --- Define the endpoints of the line you want to track ---
 pt1 = (725, 540)
 pt2 = (850, 560)
@@ -803,8 +835,7 @@ for f in Goodframes:
         print("These droplets are likely TOUCHING.\n")
     else:
         print("These droplets are likely NOT touching.\n")
-   '''     
-    
+
 for k,f in enumerate(Goodframes):
     if (k % 5 == 0):
         framedf = traj_df[traj_df['frame'] == f]
@@ -827,5 +858,3 @@ for k,f in enumerate(Goodframes):
                 white, black = count_white_black_pixels_on_line(img, pt1, pt2)
                 print('frame: '+str(f)+', white: '+str(white)+ ', black: '+str(black))
                 
-                
-## this is a test
