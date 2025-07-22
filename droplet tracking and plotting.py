@@ -74,7 +74,7 @@ def plotTrajold(traj, k, directory, frames, framei):
 
 
 # Function to plot trajectories up to a specific frame number `k`
-def plotTraj(traj, k, directory, frames,COM):
+def plotTraj(traj, k, directory, frames, COM):
     plt.figure(figsize=(12, 8), dpi=150)  #     # Create a new figure with specified size and resolution
     plt.clf()  # Clear current figure (in case it’s being reused)
 
@@ -92,6 +92,25 @@ def plotTraj(traj, k, directory, frames,COM):
     tp.plot_traj(subset, colorby='particle', cmap=mpl.cm.winter,
                  superimpose=frames[k-framei], plot_style={'linewidth': 2})
     
+
+def finddisplacements(trajectories):
+    unique_particles = trajectories['particle'].unique()
+    displacements=[]            # Initialize an empty list to store displacement values for each particle
+    for particle_id in unique_particles:           # Loop through each unique particle ID in the DataFrame
+        part = trajectories[trajectories['particle'] == particle_id]          # Select all rows corresponding to the current particle
+        # Skip if too few points to form a loop
+        if len(part) < 3:
+            continue
+        # Extract the initial (first frame) and final (last frame) x and y positions
+        disp_xi = part.iloc[0]['x']
+        disp_yi = part.iloc[0]['y']
+        disp_xf = part.iloc[-1]['x']
+        disp_yf = part.iloc[-1]['y']
+        # Compute the Euclidean distance between the initial and final positions
+        disp = np.sqrt((disp_xf - disp_xi)**2 + (disp_yf - disp_yi)**2)
+        displacements.append(disp)              # Append the displacement to the list  
+    return displacements
+ 
     
 def findareas(trajectories):
     plt.figure(figsize=(8, 8))
@@ -113,6 +132,14 @@ def findareas(trajectories):
         # Plot the loop
         plt.fill(x_closed, y_closed, alpha=0.3, label=f'Particle {particle_id}, Area={area:.2f}')
         plt.plot(x_closed, y_closed, marker='o', linestyle='-')
+        
+    if areas:
+        avgarea = np.mean(areas)
+        plt.text(0.05, 0.10, f'Average Area: {avgarea:.2f}', transform=plt.gca().transAxes,
+                 fontsize=12, color='darkred', verticalalignment='top')
+        plt.text(0.05, 0.05, f'Average Displacement: {averageDisplacement:.2f}', transform=plt.gca().transAxes,
+               fontsize=12, color='darkred', verticalalignment='top')
+        
     plt.title('Closed Loops for All Particles')
     plt.xlabel('x')
     plt.ylabel('y')
@@ -224,14 +251,14 @@ def Centre(coords):
 
 # Define file paths to locate the image sequence
 directory = 'D:/Maya/'                   # Main directory where your data is stored
-run = '250711 Testing Droplet Tracking 4/'     # Subfolder for this specific experiment-------------------------
+run = '250717 Irregular Shape Start 50 Equal Droplets/'     # Subfolder for this specific experiment-------------------------
 prefix = '*.tiff'  # File pattern to load TIFF images
 
 # Define frame range to analyze (can adjust as needed - must be at least filtering length (30))-----------------------------------------------------------
-framei = 7000                                # Starting frame index
-framef = 9700                              # Ending frame index
+framei = 35                                # Starting frame index
+framef = 70                             # Ending frame index
 
-version = "_V4 (7000-9700)"                  #for later when saving dataframe --------------------------------------------
+version = "_V2 (35-70)test"                  #for later when saving dataframe --------------------------------------------
 
 # Load image sequence using PIMS
 sequence = pims.ImageSequence(os.path.join(directory + run + prefix))
@@ -245,6 +272,13 @@ savename = run[:-1] + version          # Generate filename based on run name and
 
 filesavedir = os.path.join(plotsavedir, savename)  # Creates a path for your run's folder
 os.makedirs(filesavedir, exist_ok=True)             # Creates a folder needed to later save images
+
+# Show the last frame that was loaded and preprocessed
+plt.imshow(frames[-1], cmap='gray')  
+plt.title(f"Final Frame (Frame {framef - 1})")
+plt.axis('off')
+plt.show()
+
 
 #%% Loop through all frames and detect peaks
 
@@ -276,7 +310,6 @@ for i in range(framei,framef-1):
             cv2.circle(output, (x, y), r, (0, 255, 0), 2)       # Draw detected circle outline (green)
             cv2.circle(output, (x, y), 2, (255, 255, 255), 3)     # Draw detected circle center (white dot (tiny circle))
             poss.append([i, x, y, r])             # Store frame number, center coordinates, and radius into list
-
  # Occasionally print frame progress every x frames
     #if (i%100==0):        
     if (i%1==0):        
@@ -293,7 +326,6 @@ for i in range(framei,framef-1):
 positions = pd.DataFrame(poss, columns=['frame', 'x', 'y','size'])
 
 
-
 # Use trackpy to link detected droplet positions across frames into trajectories
 t = tp.link_df(
     positions,      # DataFrame of detected droplet positions (from Hough transform)
@@ -302,18 +334,6 @@ t = tp.link_df(
     adaptive_step=0.99, # Adjustment factor for adaptive search range
     memory=10           # Number of frames a droplet can disappear and still be linked
 ) 
-
-'''  
-###POTENTIAL OPTION IF IMPROVED TO TRACK USING SIZE INSTEAD OR COMBINE TWO
-scale_factor = 200 / 10  # = 20
-positions['size_scaled'] = positions['size'] * scale_factor
-
-t = tp.link_df(
-    positions,
-    search_range=50,
-    pos_columns=['x', 'y', 'size_scaled'],
-    memory=5)
-'''
 
 # Optional: Filter out short-lived trajectories that exist for fewer than 30 frames
 t = tp.filter_stubs(t, 30)   #uncomment this line if you want to apply filtering-----------------------
@@ -349,19 +369,63 @@ for k in np.arange(framei, framef-1, 1):
     plt.close(fig)
 
 # Save the full trajectory dataframe to CSV for later analysis
-t.to_csv(trajsavedir + savename + '.csv')
+t.to_csv(trajsavedir + savename + '.csv', index=False)
 # Load saves trajectory DataFrame from csv into a pandas dataframe
-traj_df_loaded = pd.read_csv(trajsavedir + savename + '.csv', header = 0, index_col = 0)
+traj_df_loaded = pd.read_csv(trajsavedir + savename + '.csv', header = 0)
+
+   
+displacements = finddisplacements(t)                     
+averageDisplacement = np.mean(displacements)
+print("Average displacement is: " + str(round(averageDisplacement, 2)))
+
+areas = findareas(t)                                     
+averageArea = np.mean(areas)
+print("Average area is: " + str(round(averageArea, 2)))
 
 
-# Area calculations
+#%%Load previous Trajectories
 
-areas=findareas(t)          #runs the function find areas
+trajsavedir = 'D:/Maya/Dataframes/' 
+trajloadname = '250717 Irregular Shape Start 50 Equal Droplets 2_V4 (1280-1735)' + '.csv' #Name of file wished to be imported
+traj_prev_df = pd.read_csv(trajsavedir + trajloadname, header = 0)
 
-averageArea = np.mean(areas)        #calculate the average area for each of the areas in the areas list
-print (averageArea)
+  
+    
+displacements = finddisplacements(traj_prev_df)                     # switch to t if making a new dataframe
+averageDisplacement = np.mean(displacements)
+print("Average displacement is: " + str(round(averageDisplacement, 2)))
+
+areas = findareas(traj_prev_df)                                     # switch to t if making a new dataframe
+averageArea = np.mean(areas)
+print("Average area is: " + str(round(averageArea, 2)))
 
 
+#%% Create or add to dataframe for distance and area
+
+
+ # load name if using an old trajectory by uncommenting          
+run = '250717 Irregular Shape Start 50 Equal Droplets 2/'
+version = "_V4 (1280-1735)" 
+savename = run[:-1] + version
+
+
+# Define your new row data
+data = {
+    'save name': savename,     
+    'trial name': run[:-1],
+    'cycle number': int(version[2]),
+    'average displacement': averageDisplacement,     # or whatever variable holds it
+    'average area': averageArea                          # or whatever your variable is
+}
+
+new_row = pd.DataFrame([data])                  # Convert to DataFrame
+csv_path = 'D:/Maya/Dataframes/Displacement and Area/Displacement_and_Area.csv'         # Define path
+
+# If file exists, append without header; otherwise, write with header
+if os.path.isfile(csv_path):
+    new_row.to_csv(csv_path, mode='a', index=False, header=False)
+else:
+    new_row.to_csv(csv_path, index=False)
 
 
 
@@ -402,7 +466,7 @@ tol = 1.03   # Set tolerance for neighbor size comparison (used to filter close-
 
 # Loop through each frame in the dataset
 for f in traj_df_loaded['frame'].unique():
-    #print('FRAME:' + str(f))  # Print frame number for tracking progress
+    print('FRAME:' + str(f))  # Print frame number for tracking progress
     framedf = traj_df_loaded[traj_df_loaded['frame'] == f]     # Filter the data for just this frame
     trajnew = findNNdf(framedf, maxr * 2.5)     # Find initial nearest neighbors using KDTree with a radius based on max particle size
     t = filter_neighbors_by_size(trajnew, tolerance=tol)     # Filter neighbors based on proximity and particle size similarity
@@ -415,28 +479,21 @@ traj_df = pd.concat(frames_data, ignore_index=True)
 
 #%% COM calculation
 
-# Initialize an empty list to store COM values for each frame
-COM = []
-traj_df['volume']=traj_df['size']**3 # Calculate the volume of each droplet by cubing its size (4/3 cancels out later)
+COM = []        # Initialize an empty list to store COM values for each frame
+traj_df['volume']=traj_df['size']**3         # Calculate the volume of each droplet by cubing its size (4/3 cancels out later)
 
-# Loop through each unique frame in the trajectory DataFrame
-for f in traj_df['frame'].unique():
+for f in traj_df['frame'].unique():         # Loop through each unique frame in the trajectory DataFrame
     frame_data = traj_df[traj_df['frame'] == f]     # Extract all particles in the current frame
     total_vol = frame_data['volume'].sum()     # Calculate the total volume of all particles in this frame
     # Compute the volume-weighted average x and y coordinates (COM position)
     COMx = np.sum(frame_data.x*frame_data.volume) / total_vol
     COMy = np.sum(frame_data.y*frame_data.volume) / total_vol
-    
-    # Store the COM coordinates and corresponding frame number in a list
-    COM.append((COMx,COMy,f))
-# Convert the list of COM values into a pandas DataFrame with labeled columns
-COM_df = pd.DataFrame(COM, columns=['x', 'y', 'frame'])
-
+    COM.append((COMx,COMy,f))               # Store the COM coordinates and corresponding frame number in a list
+COM_df = pd.DataFrame(COM, columns=['x', 'y', 'frame'])         # Convert the list of COM values into a pandas DataFrame with labeled columns
 
 #%%Separation by frame
 
-particles = traj_df['particle'].unique() # Get all unique particle IDs in the dataset
-
+particles = traj_df['particle'].unique()        # Get all unique particle IDs in the dataset
 # Initialize lists to store data for each frame
 BondsList = []   # Number of particle-particle bonds per frame
 SepList = []     # Mean separation per frame
@@ -444,27 +501,21 @@ Goodframes = []  # Frames successfully analyzed
 XList = []       # Center of mass x-coordinate
 YList = []       # Center of mass y-coordinate
 
-#Loop through each frame in the dataset
-for f in traj_df['frame'].unique():
-    # Filter data for the current frame
-    framedf =   traj_df[traj_df['frame']==f]
-    particlesf = framedf['particle'].unique()
-   
+for f in traj_df['frame'].unique():         #Loop through each frame in the dataset
+    framedf =   traj_df[traj_df['frame']==f]                # Select only the rows corresponding to the current frame
+    particlesf = framedf['particle'].unique()               # Get the unique particle IDs present in this frame
     # Initialize metrics for this frame
-    Bonds = 0  #Variable to count num of bonds
-    Mean_Sep = 0
-    Count_Pairs = 0
-    Good_frame = f
-       
-    # Calculate geometric centre
+    Bonds = 0           #Variable to count num of bonds
+    Mean_Sep = 0        # Average seperation between a pair of droplets
+    Count_Pairs = 0        # Counter for how many droplet pairs are considered 
+    Good_frame = f          # current frame number
+    # Calculate geometric centre of the frame
     Cen = Centre(framedf[['x','y']].to_numpy())
     XList.append(Cen[0])
     YList.append(Cen[1])
     
-
-    #Loop through each unique particle pairing
-    for i in  particlesf:
-        for j in particlesf: #avoid double counting
+    for i in  particlesf:           #Loop through each unique particle pairing
+        for j in particlesf:        #avoid double counting
             if (j > i):
                 # Extract position info for particle i and j
                 particleAdf = framedf[framedf['particle']==i]
@@ -472,16 +523,15 @@ for f in traj_df['frame'].unique():
                 #Calculate particle separation
                 sep = np.sqrt((particleAdf['x'].iloc[0] - particleBdf['x'].iloc[0])**2 + 
                               (particleAdf['y'].iloc[0] - particleBdf['y'].iloc[0])**2)
-                Mean_Sep += sep  # Accumulate separation for averaging
-                
+                Mean_Sep += sep         # Accumulate separation for averaging
                 # Check if particles are in contact (within scaled sum of radii)
                 if (sep <= (Sizedf[Sizedf['ID']==i]['r'].iloc[0] + 
                     Sizedf[Sizedf['ID']==j]['r'].iloc[0]) * (tol)):
                     Contact = True
-                    Bonds += 1  # Count as a bond if close enough
+                    Bonds += 1           # Count as a bond if close enough
                 else:
                     Contact = False
-                Count_Pairs += 1  # Keep track of how many pairs checked
+                Count_Pairs += 1        # Keep track of how many pairs checked
 
     Mean_Sep = Mean_Sep/Count_Pairs        # Average separation across all pairs in this frame
     # Record metrics for the frame
@@ -492,7 +542,6 @@ for f in traj_df['frame'].unique():
 Bondsdf = pd.DataFrame(data=list(zip(Goodframes,BondsList,SepList, XList, YList)),columns = ['frame','Num_Bonds','Mean_Sep', 'Centre_X','Centre_Y'])        
 
 #%% Plot number of bonds per frame
-
 plt.figure(figsize=(10, 6)) # Create a new figure with a specific size
 plt.plot(Bondsdf['frame'], Bondsdf['Num_Bonds'], marker='o', linestyle='none') # Plot the number of bonds in each frame (as individual points, no connecting lines)
 plt.title('Number of Bonds per Frame')
@@ -501,8 +550,8 @@ plt.ylabel('Number of Bonds')
 plt.grid(True)
 plt.show() # Display the plot
 
-#%% Plot distance between droplets
 
+# Plot distance between droplets
 plt.figure(figsize=(10, 6)) # Create a new figure with a specific size
 plt.plot(Bondsdf['frame'], Bondsdf['Mean_Sep'], marker='o', linestyle='none') # Plot the mean separation distance between particles per frame (individual points)
 plt.title('Distance Between Droplets')
@@ -510,6 +559,9 @@ plt.xlabel('Frame')
 plt.ylabel('Distance')
 plt.grid(True)
 plt.show() # Display the plot
+
+
+
 
 #%% Plotting droplets and bonds
 
@@ -649,80 +701,6 @@ for k,f in enumerate(Goodframes):
         connections.append(fig)
         plt.show()
   
- 
-#%% Combined version
-# Optional: Smooth positions across time for averaged plotting
-for f in Goodframes:
-    framedf = traj_df[traj_df['frame'] == f]
-    for p in framedf['particle'].unique():
-        posnew = []
-        for i in range(-2, 3):
-            tempdf = traj_df[traj_df['frame'] == f + i]
-            row = tempdf[tempdf['particle'] == p]
-            if not row.empty:
-                posnew.append(row[['x', 'y']].iloc[0].tolist())
-        if len(posnew) == 5:
-            avg_x = sum(pos[0] for pos in posnew) / 5
-            avg_y = sum(pos[1] for pos in posnew) / 5
-            traj_df.loc[(traj_df['particle'] == p) & (traj_df['frame'] == f), ['xsm', 'ysm']] = [avg_x, avg_y]
-
-# General plotting function
-def plot_frame(f, use_smoothed=False, window_size=600):
-    framedf = traj_df[traj_df['frame'] == f]
-    particlesf = framedf['particle'].unique()
-    fig, ax = plt.subplots(figsize=(6, 6))
-
-    for j, p in enumerate(particlesf):
-        color = cmap(norm(p))
-        particle_row = framedf[framedf['particle'] == p]
-
-        # Use smoothed coords if requested and available, else raw coords
-        if use_smoothed and 'xsm' in particle_row.columns and not pd.isna(particle_row['xsm'].iloc[0]):
-            x = particle_row['xsm'].iloc[0]
-            y = particle_row['ysm'].iloc[0]
-        else:
-            x = particle_row['x'].iloc[0]
-            y = particle_row['y'].iloc[0]
-
-        r = Sizedf[Sizedf['ID'] == p]['r'].iloc[0]
-        circle = mpl.patches.Circle((x, y), r, facecolor=color)
-        ax.add_patch(circle)
-
-    # Draw neighbor connections
-    for _, row in framedf.iterrows():
-        for neighbor_id in row['nearest_neighbors']:
-            
-            neighbor_row = framedf[framedf['particle'] == neighbor_id].iloc[0]
-            x_coords = [row['x'], neighbor_row['x']]
-            y_coords = [row['y'], neighbor_row['y']]
-            line_color = 'dimgrey'
-
-            # Choose which coords to plot for neighbors
-            if use_smoothed and ('xsm' in row and 'xsm' in neighbor_row) and \
-               (not pd.isna(row['xsm']) and not pd.isna(neighbor_row['xsm'])):
-                x_coords = [row['xsm'], neighbor_row['xsm']]
-                y_coords = [row['ysm'], neighbor_row['ysm']]
-                line_color = 'red'
-               
-            ax.plot(x_coords, y_coords, linestyle='dotted', linewidth=5, color=line_color, alpha=0.9)
-
-    # Center the plot
-    X_Mid = Bondsdf[Bondsdf['frame'] == f]['Centre_X'].iloc[0]
-    Y_Mid = Bondsdf[Bondsdf['frame'] == f]['Centre_Y'].iloc[0]
-    ax.set_xlim(X_Mid - window_size, X_Mid + window_size)
-    ax.set_ylim(Y_Mid - window_size, Y_Mid + window_size)
-
-    ax.set_title(f"Particle Network - Frame {f} {'(Smoothed)' if use_smoothed else '(Raw)'}")
-    ax.set_xlabel("X Coordinate")
-    ax.set_ylabel("Y Coordinate")
-    plt.show()
-    plt.close()
-#### problem when a dot is not picked up for the average plot - makes it a point 0,0 which throws off the rest of the averages and gives a random dot on the graph
-for f in Goodframes[2:-2]:  # Ensure full 5-frame window exists
-    if f % 5 == 0:
-        #plot_frame(f, use_smoothed=False)
-        plot_frame(f, use_smoothed=True)
-
 #%% Bonds plot for average vs every bond
 
 particles = traj_df['particle'].unique()
@@ -777,13 +755,12 @@ plt.ylabel('Number of Bonds')
 plt.grid(True)
 plt.show()
 
-#%% Section: Plot trajectories over time
+#%% Section: Plot trajectories over time with centre of mass
 
 # Loop over time in steps (every 4 frames) and plot trajectory snapshots
 for k in np.arange(framei,framef-1, 4):
     print(k)  # Print current frame number
     plotTraj(traj_df_loaded, k, directory, frames, COM_df)  # Plot trajectory on this frame
-    
         
 #%% COM distance between frames
 
