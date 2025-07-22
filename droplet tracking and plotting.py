@@ -403,7 +403,7 @@ print("Average area is: " + str(round(averageArea, 2)))
 #%% Create or add to dataframe for distance and area
 
 
- # load name if using an old trajectory by uncommenting          
+# load name if using an old trajectory by uncommenting          
 run = '250717 Irregular Shape Start 50 Equal Droplets 2/'
 version = "_V4 (1280-1735)" 
 savename = run[:-1] + version

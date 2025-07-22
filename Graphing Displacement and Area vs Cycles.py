@@ -34,7 +34,7 @@ plt.figure(figsize=(10, 6))
 for trial_name, group in DisplacementAreaDF.groupby('trial name'):
     if not trial_is_included(trial_name):
         continue
-    plt.plot(group['cycle number'], group['average displacement'], marker='o', label=trial_name)
+    plt.plot(group['cycle number'], group['average displacement']/group['average displacement'].iloc[0], marker='o', label=trial_name)
 
 plt.xlabel("Cycle")
 plt.ylabel("Average Displacement")
@@ -50,7 +50,7 @@ plt.figure(figsize=(10, 6))          # Start a new figure
 for trial_name, group in DisplacementAreaDF.groupby('trial name'):
     if not trial_is_included(trial_name):
         continue
-    plt.plot(group['cycle number'], group['average area'], marker='s', label=trial_name)
+    plt.plot(group['cycle number'], group['average area']/group['average area'].iloc[0], marker='s', label=trial_name)
 
 plt.xlabel("Cycle")
 plt.ylabel("Average Area")
